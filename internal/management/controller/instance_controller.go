@@ -239,6 +239,8 @@ func (r *InstanceReconciler) Reconcile(
 		return reconcile.Result{}, err
 	}
 
+	r.reconcilePrimaryLeaseGuard(ctx, cluster)
+
 	if r.IsDBUp(ctx) != nil {
 		return reconcile.Result{RequeueAfter: time.Second}, nil
 	}

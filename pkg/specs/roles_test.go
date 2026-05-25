@@ -168,15 +168,15 @@ var _ = Describe("Roles", func() {
 		serviceAccount := CreateRole(cluster, nil)
 		Expect(serviceAccount.Name).To(Equal(cluster.Name))
 		Expect(serviceAccount.Namespace).To(Equal(cluster.Namespace))
-		Expect(serviceAccount.Rules).To(HaveLen(15))
+		Expect(serviceAccount.Rules).To(HaveLen(16))
 	})
 
 	It("should contain every secret of the origin backup and backup configuration of every external cluster", func() {
 		serviceAccount := CreateRole(cluster, &backupOrigin)
 		Expect(serviceAccount.Name).To(Equal(cluster.Name))
 		Expect(serviceAccount.Namespace).To(Equal(cluster.Namespace))
-		Expect(serviceAccount.Rules[0].ResourceNames).To(ConsistOf("thisTest", "testConfigMapKeySelector"))
-		Expect(serviceAccount.Rules[1].ResourceNames).To(ConsistOf(
+		Expect(serviceAccount.Rules[1].ResourceNames).To(ConsistOf("thisTest", "testConfigMapKeySelector"))
+		Expect(serviceAccount.Rules[2].ResourceNames).To(ConsistOf(
 			"testReplicationTLSSecret",
 			"testClientCASecret",
 			"testServerCASecret",

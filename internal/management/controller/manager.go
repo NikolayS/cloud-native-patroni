@@ -56,6 +56,7 @@ type InstanceReconciler struct {
 
 	certificateReconciler *instancecertificate.Reconciler
 	pluginRepository      repository.Interface
+	primaryLeaseGuard     *primaryLeaseGuard
 }
 
 // NewInstanceReconciler creates a new instance reconciler

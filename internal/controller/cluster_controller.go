@@ -85,6 +85,7 @@ var errOldPrimaryDetected = errors.New("old primary detected")
 // ClusterReconciler reconciles a Cluster objects
 type ClusterReconciler struct {
 	client.Client
+	APIReader client.Reader
 
 	DiscoveryClient discovery.DiscoveryInterface
 	Scheme          *runtime.Scheme
@@ -107,6 +108,7 @@ func NewClusterReconciler(
 		InstanceClient:  remote.NewClient().Instance(),
 		DiscoveryClient: discoveryClient,
 		Client:          operatorclient.NewExtendedClient(mgr.GetClient()),
+		APIReader:       mgr.GetAPIReader(),
 		Scheme:          mgr.GetScheme(),
 		Recorder:        mgr.GetEventRecorderFor("cloudnative-pg"), //nolint:staticcheck
 		Plugins:         plugins,

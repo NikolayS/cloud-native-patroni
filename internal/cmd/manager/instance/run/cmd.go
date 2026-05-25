@@ -29,6 +29,7 @@ import (
 
 	"github.com/cloudnative-pg/machinery/pkg/log"
 	"github.com/spf13/cobra"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -215,6 +216,8 @@ func runSubCommand( //nolint: gocyclo,gocognit
 					// we don't have the permissions to cache FailoverQuorum objects, we can
 					// only access the object having the same name as the cluster
 					&apiv1.FailoverQuorum{},
+					// primary leases are read/updated directly by name; no list/watch needed
+					&coordinationv1.Lease{},
 				},
 			},
 		},

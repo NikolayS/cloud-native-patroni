@@ -122,6 +122,19 @@ func (r *ClusterReconciler) reconcileTargetPrimaryForNonReplicaCluster(
 	}
 
 	// The current primary is not correctly working, and we need to elect a new one
+	// but before doing that we wait for its primary lease to expire. This gives the
+	// old primary a chance to actively fence itself before any replacement is promoted.
+	if cluster.Status.TargetPrimary == cluster.Status.CurrentPrimary {
+		leaseExpired, err := r.isPrimaryLeaseExpired(ctx, cluster)
+		if err != nil {
+			return "", err
+		}
+		if !leaseExpired {
+			return "", nil
+		}
+	}
+
+	// The current primary is not correctly working, and we need to elect a new one
 	// but before doing that we need to wait for all the WAL receivers to be
 	// terminated. To make sure they eventually terminate we signal the old primary
 	// (if is still alive) to shut down by setting the apiv1.PendingFailoverMarker as
