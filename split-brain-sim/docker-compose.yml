@@ -1,0 +1,101 @@
+services:
+  primary:
+    image: ${PG_IMAGE:-postgres:18beta1}
+    container_name: sb-primary
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: md5
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - synchronous_commit=on
+      - -c
+      - hot_standby=on
+      - -c
+      - wal_log_hints=on
+      - -c
+      - listen_addresses=*
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    networks:
+      - splitbrain
+
+  replica1:
+    image: ${PG_IMAGE:-postgres:18beta1}
+    container_name: sb-replica1
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGPASSWORD: repl_secret
+    depends_on:
+      primary:
+        condition: service_healthy
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - |
+        rm -rf /var/lib/postgresql/data/*
+        until PGPASSWORD=repl_secret pg_basebackup -h primary -U replicator \
+            -D /var/lib/postgresql/data -Fp -Xs -P -R \
+            --slot=slot_replica1 2>&1; do
+          echo "Waiting for primary..."
+          sleep 2
+        done
+        echo "primary_slot_name = 'slot_replica1'" >> /var/lib/postgresql/data/postgresql.auto.conf
+        chown -R postgres:postgres /var/lib/postgresql/data
+        chmod 700 /var/lib/postgresql/data
+        exec docker-entrypoint.sh postgres -c hot_standby=on -c wal_log_hints=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks:
+      - splitbrain
+
+  replica2:
+    image: ${PG_IMAGE:-postgres:18beta1}
+    container_name: sb-replica2
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGPASSWORD: repl_secret
+    depends_on:
+      primary:
+        condition: service_healthy
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - |
+        rm -rf /var/lib/postgresql/data/*
+        until PGPASSWORD=repl_secret pg_basebackup -h primary -U replicator \
+            -D /var/lib/postgresql/data -Fp -Xs -P -R \
+            --slot=slot_replica2 2>&1; do
+          echo "Waiting for primary..."
+          sleep 2
+        done
+        echo "primary_slot_name = 'slot_replica2'" >> /var/lib/postgresql/data/postgresql.auto.conf
+        chown -R postgres:postgres /var/lib/postgresql/data
+        chmod 700 /var/lib/postgresql/data
+        exec docker-entrypoint.sh postgres -c hot_standby=on -c wal_log_hints=on
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    networks:
+      - splitbrain
+
+networks:
+  splitbrain:
+    name: splitbrain-net
+    driver: bridge
