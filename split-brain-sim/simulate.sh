@@ -2,10 +2,9 @@
 #
 # Split-Brain Simulation for PostgreSQL 18 Streaming Replication
 #
-# Demonstrates that without a consensus-based fencing mechanism,
-# a network partition creates a window where TWO primaries accept
-# writes simultaneously, and the old primary's writes are silently
-# lost after pg_rewind.
+# Demonstrates that a network partition creates a window where TWO primaries accept
+# writes simultaneously.
+# The result is two independently writable PostgreSQL primaries.
 #
 # Usage: ./simulate.sh [--cleanup]
 #
@@ -54,7 +53,7 @@ trap cleanup EXIT
 # -------------------------------------------------------------------
 banner "SPLIT-BRAIN SIMULATION"
 echo "This simulation demonstrates a split-brain scenario in"
-echo "PostgreSQL streaming replication without consensus-based fencing."
+echo "PostgreSQL streaming replication during primary isolation."
 echo ""
 echo "Image: $PG_IMAGE"
 divider
@@ -69,6 +68,7 @@ info "Starting primary: $PRIMARY"
 docker run -d --name $PRIMARY --network $NET \
     -e POSTGRES_PASSWORD=$PG_PASS \
     -e POSTGRES_HOST_AUTH_METHOD=md5 \
+    -e PGDATA=/tmp/pgdata \
     $PG_IMAGE \
     -c wal_level=replica \
     -c max_wal_senders=10 \
@@ -87,7 +87,8 @@ sleep 2
 info "Configuring replication user and pg_hba"
 sql_primary "CREATE ROLE $REPL_USER WITH REPLICATION LOGIN PASSWORD '$REPL_PASS';"
 
-docker exec $PRIMARY bash -c "cat >> /var/lib/postgresql/data/pg_hba.conf <<'HBA'
+hba_file=$(sql_primary "SHOW hba_file;")
+docker exec $PRIMARY bash -c "cat >> '$hba_file' <<HBA
 host replication $REPL_USER all md5
 host all all all md5
 HBA"
@@ -107,6 +108,7 @@ for replica in $REPLICA1 $REPLICA2; do
     docker run -d --name $replica --network $NET \
         -e POSTGRES_PASSWORD=$PG_PASS \
         -e PGPASSWORD=$REPL_PASS \
+        -e PGDATA=/tmp/pgdata \
         $PG_IMAGE \
         -c hot_standby=on \
         -c wal_log_hints=on >/dev/null
@@ -125,14 +127,15 @@ for replica in $REPLICA1 $REPLICA2; do
     docker run -d --name $replica --network $NET \
         -e POSTGRES_PASSWORD=$PG_PASS \
         -e PGPASSWORD=$REPL_PASS \
+        -e PGDATA=/tmp/pgdata \
         $PG_IMAGE bash -c "
-        rm -rf /var/lib/postgresql/data/*
+        rm -rf /tmp/pgdata/*
         PGPASSWORD=$REPL_PASS pg_basebackup -h $PRIMARY -U $REPL_USER \
-            -D /var/lib/postgresql/data -Fp -Xs -P -R \
+            -D /tmp/pgdata -Fp -Xs -P -R \
             --slot=$slot_name 2>&1
-        echo \"primary_slot_name = '$slot_name'\" >> /var/lib/postgresql/data/postgresql.auto.conf
-        chown -R postgres:postgres /var/lib/postgresql/data
-        chmod 700 /var/lib/postgresql/data
+        echo \"primary_slot_name = '$slot_name'\" >> /tmp/pgdata/postgresql.auto.conf
+        chown -R postgres:postgres /tmp/pgdata
+        chmod 700 /tmp/pgdata
         exec docker-entrypoint.sh postgres -c hot_standby=on -c wal_log_hints=on
     " >/dev/null
 done
@@ -221,11 +224,11 @@ echo "  │  New primary ($REPLICA1): accepting writes  │"
 echo "  └─────────────────────────────────────────────────┘"
 echo -e "${NC}"
 
-info "Writing to OLD primary ($PRIMARY) — these writes will be LOST:"
+info "Writing to OLD primary ($PRIMARY) during the partition:"
 for i in $(seq 1 10); do
     docker exec -e PGPASSWORD=$PG_PASS $PRIMARY \
         psql -U postgres -tAc \
-        "INSERT INTO critical_data (value, written_by) VALUES ('DOOMED write #$i from isolated primary', 'OLD-primary') RETURNING id, value;" \
+        "INSERT INTO critical_data (value, written_by) VALUES ('old-primary write #$i during partition', 'OLD-primary') RETURNING id, value;" \
         2>/dev/null
 done
 
@@ -271,72 +274,25 @@ sql_replica1 "SELECT id, left(value,50) as value, written_by, ts FROM critical_d
 
 divider
 
-doomed_count=$(docker exec -e PGPASSWORD=$PG_PASS $PRIMARY \
+old_partition_count=$(docker exec -e PGPASSWORD=$PG_PASS $PRIMARY \
     psql -U postgres -tAc "SELECT count(*) FROM critical_data WHERE written_by LIKE 'OLD%';" 2>/dev/null)
 
 echo ""
 echo -e "${RED}${BOLD}SPLIT-BRAIN RESULT:${NC}"
-echo -e "  Old primary has ${RED}${BOLD}$old_count${NC} rows ($doomed_count written during partition)"
+echo -e "  Old primary has ${RED}${BOLD}$old_count${NC} rows ($old_partition_count written during partition)"
 echo -e "  New primary has ${GREEN}${BOLD}$new_count${NC} rows"
-echo -e "  ${RED}${BOLD}$doomed_count rows are DOOMED${NC} — they will be silently discarded by pg_rewind"
+echo -e "  ${RED}${BOLD}$old_partition_count rows${NC} were committed on the isolated old primary"
 echo ""
 
 # -------------------------------------------------------------------
-banner "Phase 8: Reconnect and Demonstrate Data Loss"
+banner "RESULTS"
 
-info "Reconnecting $PRIMARY to the network..."
-docker network connect $NET $PRIMARY
-
-sleep 2
-
-info "Old primary's data BEFORE pg_rewind:"
-docker exec -e PGPASSWORD=$PG_PASS $PRIMARY \
-    psql -U postgres -tAc "SELECT count(*) FROM critical_data WHERE written_by LIKE 'OLD%';" 2>/dev/null
-
-info "Stopping old primary for pg_rewind..."
-docker exec $PRIMARY pg_ctl stop -D /var/lib/postgresql/data -m fast 2>/dev/null || true
-sleep 2
-
-info "Running pg_rewind to re-sync old primary with new primary..."
-docker exec -e PGPASSWORD=$PG_PASS $PRIMARY bash -c "
-    pg_rewind --target-pgdata=/var/lib/postgresql/data \
-              --source-server='host=$REPLICA1 port=5432 user=postgres password=$PG_PASS dbname=postgres' \
-              --progress 2>&1
-" || warn "pg_rewind may require wal_log_hints or checksums — demonstrating the concept"
-
-info "Restarting old primary as replica..."
-docker exec $PRIMARY bash -c "
-    touch /var/lib/postgresql/data/standby.signal
-    echo \"primary_conninfo = 'host=$REPLICA1 port=5432 user=$REPL_USER password=$REPL_PASS'\" >> /var/lib/postgresql/data/postgresql.auto.conf
-" 2>/dev/null || true
-
-docker exec -u postgres $PRIMARY pg_ctl start -D /var/lib/postgresql/data -l /tmp/pg.log 2>/dev/null || true
-sleep 3
-
-# Show the data loss
-surviving_old=$(docker exec -e PGPASSWORD=$PG_PASS $PRIMARY \
-    psql -U postgres -tAc "SELECT count(*) FROM critical_data WHERE written_by LIKE 'OLD%';" 2>/dev/null || echo "0")
-
-divider
 echo ""
-echo -e "${RED}${BOLD}╔═══════════════════════════════════════════════════════╗${NC}"
-echo -e "${RED}${BOLD}║              DATA LOSS SUMMARY                        ║${NC}"
-echo -e "${RED}${BOLD}╠═══════════════════════════════════════════════════════╣${NC}"
-echo -e "${RED}${BOLD}║${NC} Writes during partition (OLD primary):  ${RED}$doomed_count${NC}         ${RED}${BOLD}║${NC}"
-echo -e "${RED}${BOLD}║${NC} Surviving after pg_rewind:              ${GREEN}${surviving_old:-0}${NC}          ${RED}${BOLD}║${NC}"
-echo -e "${RED}${BOLD}║${NC} ${RED}${BOLD}SILENTLY LOST:                          $doomed_count${NC}         ${RED}${BOLD}║${NC}"
-echo -e "${RED}${BOLD}║${NC}                                                       ${RED}${BOLD}║${NC}"
-echo -e "${RED}${BOLD}║${NC} Those $doomed_count writes were ACK'd to clients as       ${RED}${BOLD}║${NC}"
-echo -e "${RED}${BOLD}║${NC} committed, but are now gone forever.                  ${RED}${BOLD}║${NC}"
-echo -e "${RED}${BOLD}╚═══════════════════════════════════════════════════════╝${NC}"
+echo "SPLIT BRAIN REPRODUCED"
+echo "──────────────────────"
+echo "Old primary rows:          $old_count"
+echo "Old primary partition rows: $old_partition_count"
+echo "New primary rows:          $new_count"
 echo ""
-echo "This is the fundamental problem: without a consensus-based"
-echo "fencing mechanism, there is NO way to prevent the old primary"
-echo "from accepting writes during the partition window."
-echo ""
-echo "In CNPG, this window is ~30 seconds (failureThreshold × periodSeconds)."
-echo "In this simulation, the window was unlimited until manual intervention."
-echo ""
-echo "The quorum check (R + W > N) only governs PROMOTION decisions —"
-echo "it cannot reach into the isolated primary and stop it from writing."
-echo ""
+echo "Both PostgreSQL servers accepted and committed writes during the partition."
+echo "Cleanup: ./simulate.sh --cleanup"
