@@ -44,7 +44,7 @@ echo "    1. Set up primary + 2 replicas with streaming replication"
 echo "    2. Partition the primary from the network"
 echo "    3. Promote a replica → new primary"
 echo "    4. Write to BOTH primaries simultaneously (split-brain)"
-echo "    5. Observe divergent committed writes"
+echo "    5. Reconnect → pg_rewind → observe data loss"
 echo ""
 
 # ===================================================================
@@ -244,25 +244,102 @@ docker exec -e PGPASSWORD=$PG_PASS sb-replica1 \
     FROM critical_data ORDER BY id;" 2>/dev/null
 
 # ===================================================================
+banner "Phase 7: Reconnect + pg_rewind → Data Loss"
+
+step "Reconnecting old primary to the network"
+docker network connect splitbrain-net sb-primary
+sleep 2
+info "Network restored"
+
+step "Checkpointing promoted primary before rewind"
+sql_replica1 "CHECKPOINT;" >/dev/null
+
+step "Stopping old primary container"
+docker stop sb-primary >/dev/null
+info "Old primary stopped"
+
+step "Running pg_rewind (syncing old primary to promoted primary timeline)"
+set +e
+rewind_output=$(docker run --rm \
+    --volumes-from sb-primary \
+    --network splitbrain-net \
+    -e PGPASSWORD=$PG_PASS \
+    --user postgres \
+    "$PG_IMAGE" \
+    pg_rewind \
+        --target-pgdata=/tmp/pgdata \
+        --source-server="host=sb-replica1 port=5432 user=postgres password=$PG_PASS dbname=postgres" \
+        --progress 2>&1)
+rewind_exit=$?
+set -e
+while IFS= read -r line; do
+    echo "    $line"
+done <<< "$rewind_output"
+
+if [[ $rewind_exit -ne 0 ]]; then
+    fail "pg_rewind failed with code $rewind_exit"
+    exit $rewind_exit
+fi
+info "pg_rewind completed successfully"
+
+step "Restarting old primary as standby"
+docker run --rm \
+    --volumes-from sb-primary \
+    --user postgres \
+    "$PG_IMAGE" \
+    bash -c "
+        touch /tmp/pgdata/standby.signal
+        sed -i '/^primary_conninfo/d' /tmp/pgdata/postgresql.auto.conf
+        sed -i '/^primary_slot_name/d' /tmp/pgdata/postgresql.auto.conf
+        echo \"primary_conninfo = 'host=sb-replica1 port=5432 user=$REPL_USER password=$REPL_PASS'\" >> /tmp/pgdata/postgresql.auto.conf
+    "
+docker start sb-primary >/dev/null
+sleep 5
+
+is_standby=$(docker exec -e PGPASSWORD=$PG_PASS sb-primary \
+    psql -U postgres -tAc "SELECT pg_is_in_recovery();" 2>/dev/null || echo "error")
+if [[ "$is_standby" == "t" ]]; then
+    info "Old primary is now running as standby"
+else
+    fail "Old primary recovery status: $is_standby"
+    docker logs --tail=80 sb-primary || true
+    exit 1
+fi
+
+post_rewind_total=$(docker exec -e PGPASSWORD=$PG_PASS sb-primary \
+    psql -U postgres -tAc "SELECT count(*) FROM critical_data;" 2>/dev/null)
+post_rewind_old_writes=$(docker exec -e PGPASSWORD=$PG_PASS sb-primary \
+    psql -U postgres -tAc "SELECT count(*) FROM critical_data WHERE source LIKE 'OLD%';" 2>/dev/null)
+
+step "Checking data on rewound old primary"
+docker exec -e PGPASSWORD=$PG_PASS sb-primary \
+    psql -U postgres -c "
+    SELECT id, left(value,45) AS value, source,
+           created_at::time(0) AS time
+    FROM critical_data ORDER BY id;" 2>/dev/null
+
+# ===================================================================
 banner "RESULTS"
 
-cat << EOF
-  SPLIT BRAIN REPRODUCED
-  ──────────────────────
+lost=$((old_partition_writes - post_rewind_old_writes))
 
-  Baseline rows before partition:        5
-  Rows on isolated old primary:          $old_total
-  Rows written on isolated old primary:  $old_partition_writes
-  Rows on promoted new primary:          $new_total
-  Rows written on promoted new primary:  $new_partition_writes
+cat << EOF
+  SPLIT BRAIN + DATA LOSS REPRODUCED
+  ─────────────────────────────────
+
+  Baseline rows before partition:         5
+  Rows on isolated old primary:           $old_total
+  Writes on isolated old primary:         $old_partition_writes
+  Writes on promoted new primary:         $new_partition_writes
+
+  After reconnect + pg_rewind:
+    Rows on rewound old primary:          $post_rewind_total
+    Old-primary partition writes present: $post_rewind_old_writes
+    Old-primary partition writes lost:    $lost
 
   During the partition, both PostgreSQL servers accepted and
-  committed writes independently:
-
-    - sb-primary was isolated but still writable
-    - sb-replica1 was promoted and also writable
-
-  This is the reproduced split-brain state.
+  committed writes independently. After pg_rewind, the writes
+  acknowledged by the isolated old primary were absent.
 
   Cleanup: docker compose down -v
 EOF

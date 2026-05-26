@@ -21,6 +21,8 @@ services:
       - -c
       - wal_log_hints=on
       - -c
+      - wal_keep_size=1GB
+      - -c
       - listen_addresses=*
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
@@ -57,7 +59,7 @@ services:
         echo "primary_slot_name = 'slot_replica1'" >> "$$PGDATA/postgresql.auto.conf"
         chown -R postgres:postgres "$$PGDATA"
         chmod 700 "$$PGDATA"
-        exec docker-entrypoint.sh postgres -c hot_standby=on -c wal_log_hints=on
+        exec docker-entrypoint.sh postgres -c hot_standby=on -c wal_log_hints=on -c wal_keep_size=1GB
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
@@ -93,7 +95,7 @@ services:
         echo "primary_slot_name = 'slot_replica2'" >> "$$PGDATA/postgresql.auto.conf"
         chown -R postgres:postgres "$$PGDATA"
         chmod 700 "$$PGDATA"
-        exec docker-entrypoint.sh postgres -c hot_standby=on -c wal_log_hints=on
+        exec docker-entrypoint.sh postgres -c hot_standby=on -c wal_log_hints=on -c wal_keep_size=1GB
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 2s
