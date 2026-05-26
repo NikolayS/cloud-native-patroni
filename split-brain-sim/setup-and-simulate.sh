@@ -95,8 +95,8 @@ if [[ "$streaming" != "2" ]]; then
 fi
 info "2/2 replicas streaming"
 
-step "Enabling synchronous replication (FIRST 1: replica1 or replica2)"
-sql_primary "ALTER SYSTEM SET synchronous_standby_names = 'FIRST 1 (replica1, replica2)';" >/dev/null
+step "Enabling synchronous replication (ANY 1: replica1 or replica2)"
+sql_primary "ALTER SYSTEM SET synchronous_standby_names = 'ANY 1 (replica1, replica2)';" >/dev/null
 sql_primary "SELECT pg_reload_conf();" >/dev/null
 for attempt in $(seq 1 30); do
     sync_count=$(sql_primary "SELECT count(*) FROM pg_stat_replication WHERE sync_state IN ('sync', 'quorum');" || echo "0")
@@ -146,14 +146,14 @@ echo ""
 
 step "Disconnecting sb-primary from the promoted-replica network"
 docker network disconnect splitbrain-net sb-primary
-info "Primary is isolated from sb-replica1 but still connected to synchronous standby sb-replica2"
+info "Primary is isolated from sb-replica1 but still connected to synchronous quorum member sb-replica2"
 
 step "Terminating old primary's walsender connection to promoted replica"
 sql_primary "SELECT pg_terminate_backend(pid) FROM pg_stat_replication WHERE application_name = 'replica1';" >/dev/null || true
 
-step "Waiting for sb-replica2 to become the synchronous standby"
+step "Waiting for sb-replica2 to remain in the synchronous quorum"
 for attempt in $(seq 1 30); do
-    sync_replica=$(sql_primary "SELECT application_name FROM pg_stat_replication WHERE sync_state = 'sync' LIMIT 1;" || true)
+    sync_replica=$(sql_primary "SELECT application_name FROM pg_stat_replication WHERE application_name = 'replica2' AND sync_state IN ('sync', 'quorum');" || true)
     if [[ "$sync_replica" == "replica2" ]]; then
         break
     fi
@@ -161,9 +161,9 @@ for attempt in $(seq 1 30); do
 done
 docker exec -e PGPASSWORD=$PG_PASS sb-primary \
     psql -U postgres -c "SELECT application_name, state, sync_state FROM pg_stat_replication ORDER BY application_name;"
-sync_replica=$(sql_primary "SELECT application_name FROM pg_stat_replication WHERE sync_state = 'sync' LIMIT 1;" || true)
+sync_replica=$(sql_primary "SELECT application_name FROM pg_stat_replication WHERE application_name = 'replica2' AND sync_state IN ('sync', 'quorum');" || true)
 if [[ "$sync_replica" != "replica2" ]]; then
-    fail "Expected replica2 to be synchronous standby, got: $sync_replica"
+    fail "Expected replica2 to remain in synchronous quorum, got: $sync_replica"
     exit 1
 fi
 echo ""
@@ -174,7 +174,7 @@ docker exec sb-primary pg_isready -U postgres >/dev/null 2>&1 \
 
 echo ""
 echo -e "  ${YELLOW}The old primary can still commit because replica2 remains reachable${NC}"
-echo -e "  ${YELLOW}and is the configured synchronous standby.${NC}"
+echo -e "  ${YELLOW}and remains in the synchronous quorum.${NC}"
 echo ""
 
 sleep 3
@@ -361,8 +361,8 @@ cat << EOF
   SPLIT BRAIN + DATA LOSS REPRODUCED
   ─────────────────────────────────
 
-  Replication mode:                       synchronous (FIRST 1)
-  Old primary synchronous standby:        replica2
+  Replication mode:                       synchronous (ANY 1)
+  Old primary sync quorum member:        replica2
   Baseline rows before partition:         5
   Rows on isolated old primary:           $old_total
   Writes on isolated old primary:         $old_partition_writes
