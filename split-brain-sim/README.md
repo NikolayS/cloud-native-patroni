@@ -55,3 +55,18 @@ KEEP_CLUSTER=1 ./split-brain-sim/cnpg-kind-7407-repro.sh
 CLUSTER_NAME=cnpg-7407-test ./split-brain-sim/cnpg-kind-7407-repro.sh
 CNPG_MANIFEST=releases/cnpg-1.25.1.yaml ./split-brain-sim/cnpg-kind-7407-repro.sh
 ```
+
+### PgQue/pg_cron workload variant
+
+For a higher-write-rate database-internal workload, use the PgQue/pg_cron variant. It builds a CNPG-compatible PostgreSQL image with `pg_cron` and PgQue v0.2.0, schedules PgQue's 10 Hz ticker loop through pg_cron, and schedules producer/consumer jobs that continue writing inside PostgreSQL during the partition without external client writes.
+
+```bash
+./split-brain-sim/cnpg-kind-pgque-repro.sh
+```
+
+Useful knobs:
+
+```bash
+EVENTS_PER_SECOND=1000 PARTITION_SECONDS=30 ./split-brain-sim/cnpg-kind-pgque-repro.sh
+KEEP_CLUSTER=1 ./split-brain-sim/cnpg-kind-pgque-repro.sh
+```
