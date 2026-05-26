@@ -33,6 +33,7 @@ services:
       - primary-data:/tmp/pgdata
     networks:
       - splitbrain
+      - oldsync
 
   replica1:
     image: ${PG_IMAGE:-postgres:18beta1}
@@ -56,6 +57,8 @@ services:
           echo "Waiting for primary..."
           sleep 2
         done
+        sed -i '/^primary_conninfo/d' "$$PGDATA/postgresql.auto.conf"
+        echo "primary_conninfo = 'host=primary port=5432 user=replicator password=repl_secret application_name=replica1'" >> "$$PGDATA/postgresql.auto.conf"
         echo "primary_slot_name = 'slot_replica1'" >> "$$PGDATA/postgresql.auto.conf"
         chown -R postgres:postgres "$$PGDATA"
         chmod 700 "$$PGDATA"
@@ -92,6 +95,8 @@ services:
           echo "Waiting for primary..."
           sleep 2
         done
+        sed -i '/^primary_conninfo/d' "$$PGDATA/postgresql.auto.conf"
+        echo "primary_conninfo = 'host=primary port=5432 user=replicator password=repl_secret application_name=replica2'" >> "$$PGDATA/postgresql.auto.conf"
         echo "primary_slot_name = 'slot_replica2'" >> "$$PGDATA/postgresql.auto.conf"
         chown -R postgres:postgres "$$PGDATA"
         chmod 700 "$$PGDATA"
@@ -105,10 +110,14 @@ services:
       - replica2-data:/tmp/pgdata
     networks:
       - splitbrain
+      - oldsync
 
 networks:
   splitbrain:
     name: splitbrain-net
+    driver: bridge
+  oldsync:
+    name: splitbrain-oldsync-net
     driver: bridge
 
 volumes:

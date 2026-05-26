@@ -37,11 +37,11 @@ sql_replica1() { docker exec -e PGPASSWORD=$PG_PASS sb-replica1 psql -U postgres
 # ===================================================================
 banner "SPLIT-BRAIN SIMULATION — PostgreSQL 18"
 echo "  This demonstrates the fundamental split-brain problem in"
-echo "  PostgreSQL HA during primary isolation."
+echo "  PostgreSQL HA during primary isolation with synchronous replication."
 echo ""
 echo "  What happens:"
 echo "    1. Set up primary + 2 replicas with streaming replication"
-echo "    2. Partition the primary from the network"
+echo "    2. Partition the primary from the promoted-replica network"
 echo "    3. Promote a replica → new primary"
 echo "    4. Write to BOTH primaries simultaneously (split-brain)"
 echo "    5. Reconnect → pg_rewind → observe data loss"
@@ -95,6 +95,20 @@ if [[ "$streaming" != "2" ]]; then
 fi
 info "2/2 replicas streaming"
 
+step "Enabling synchronous replication (FIRST 1: replica1 or replica2)"
+sql_primary "ALTER SYSTEM SET synchronous_standby_names = 'FIRST 1 (replica1, replica2)';" >/dev/null
+sql_primary "SELECT pg_reload_conf();" >/dev/null
+for attempt in $(seq 1 30); do
+    sync_count=$(sql_primary "SELECT count(*) FROM pg_stat_replication WHERE sync_state IN ('sync', 'quorum');" || echo "0")
+    if [[ "$sync_count" != "0" ]]; then
+        break
+    fi
+    sleep 1
+done
+info "Synchronous replication status:"
+docker exec -e PGPASSWORD=$PG_PASS sb-primary \
+    psql -U postgres -c "SELECT application_name, state, sync_state FROM pg_stat_replication ORDER BY application_name;"
+
 pg_version=$(sql_primary "SELECT version();")
 info "PostgreSQL: $pg_version"
 
@@ -130,9 +144,28 @@ echo "  The primary loses all connectivity, but PostgreSQL"
 echo "  keeps running — it has no way to know it's isolated."
 echo ""
 
-step "Disconnecting sb-primary from the network"
+step "Disconnecting sb-primary from the promoted-replica network"
 docker network disconnect splitbrain-net sb-primary
-info "Primary is now ISOLATED"
+info "Primary is isolated from sb-replica1 but still connected to synchronous standby sb-replica2"
+
+step "Terminating old primary's walsender connection to promoted replica"
+sql_primary "SELECT pg_terminate_backend(pid) FROM pg_stat_replication WHERE application_name = 'replica1';" >/dev/null || true
+
+step "Waiting for sb-replica2 to become the synchronous standby"
+for attempt in $(seq 1 30); do
+    sync_replica=$(sql_primary "SELECT application_name FROM pg_stat_replication WHERE sync_state = 'sync' LIMIT 1;" || true)
+    if [[ "$sync_replica" == "replica2" ]]; then
+        break
+    fi
+    sleep 1
+done
+docker exec -e PGPASSWORD=$PG_PASS sb-primary \
+    psql -U postgres -c "SELECT application_name, state, sync_state FROM pg_stat_replication ORDER BY application_name;"
+sync_replica=$(sql_primary "SELECT application_name FROM pg_stat_replication WHERE sync_state = 'sync' LIMIT 1;" || true)
+if [[ "$sync_replica" != "replica2" ]]; then
+    fail "Expected replica2 to be synchronous standby, got: $sync_replica"
+    exit 1
+fi
 echo ""
 
 docker exec sb-primary pg_isready -U postgres >/dev/null 2>&1 \
@@ -140,9 +173,8 @@ docker exec sb-primary pg_isready -U postgres >/dev/null 2>&1 \
     || fail "Primary not accepting connections"
 
 echo ""
-echo -e "  ${YELLOW}In CNPG, the liveness probe would detect this after${NC}"
-echo -e "  ${YELLOW}~30 seconds (failureThreshold=3 × periodSeconds=10).${NC}"
-echo -e "  ${YELLOW}During that window, the old primary accepts writes.${NC}"
+echo -e "  ${YELLOW}The old primary can still commit because replica2 remains reachable${NC}"
+echo -e "  ${YELLOW}and is the configured synchronous standby.${NC}"
 echo ""
 
 sleep 3
@@ -174,7 +206,7 @@ cat << 'DIAGRAM'
      │                         │     │                          │
      │  ✓ Accepting writes     │ ╳╳╳ │  ✓ Accepting writes      │
      │  ✓ Committing txns     │ ╳╳╳ │  ✓ Committing txns       │
-     │  ✗ No replication      │ net │  ✓ replica2 following    │
+     │  ✓ sync repl: replica2│ net │  ✗ old primary hidden  │
      │                         │ cut │                          │
      │  Writes HERE stay on  │     │  Writes HERE stay on   │
      │  old timeline         │     │  new timeline          │
@@ -186,7 +218,8 @@ echo -e "${NC}"
 step "Writing to OLD primary (sb-primary) during partition"
 
 docker exec -e PGPASSWORD=$PG_PASS sb-primary \
-    psql -U postgres -tAc "
+    psql -U postgres -v ON_ERROR_STOP=1 -tAc "
+    SET statement_timeout = '10s';
     INSERT INTO critical_data (value, source)
     SELECT 'old-primary write #' || g, 'OLD-primary'
     FROM generate_series(1, 10) g
@@ -196,7 +229,8 @@ echo ""
 
 step "Simulating pg_cron / PgQue ticks (10 writes/sec for 3 seconds)"
 docker exec -e PGPASSWORD=$PG_PASS sb-primary \
-    psql -U postgres -tAc "
+    psql -U postgres -v ON_ERROR_STOP=1 -tAc "
+    SET statement_timeout = '10s';
     DO \$\$
     BEGIN
         FOR i IN 1..30 LOOP
@@ -327,6 +361,8 @@ cat << EOF
   SPLIT BRAIN + DATA LOSS REPRODUCED
   ─────────────────────────────────
 
+  Replication mode:                       synchronous (FIRST 1)
+  Old primary synchronous standby:        replica2
   Baseline rows before partition:         5
   Rows on isolated old primary:           $old_total
   Writes on isolated old primary:         $old_partition_writes
