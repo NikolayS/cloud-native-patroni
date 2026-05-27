@@ -70,3 +70,31 @@ Useful knobs:
 EVENTS_PER_SECOND=1000 PARTITION_SECONDS=30 ./split-brain-sim/cnpg-kind-pgque-repro.sh
 KEEP_CLUSTER=1 ./split-brain-sim/cnpg-kind-pgque-repro.sh
 ```
+
+## PostgreSQL-only non-WAL / split-brain-adjacent state reproduction
+
+`pg-local-non-wal-split-brain-repro.sh` is a local PostgreSQL reproduction that
+separates PostgreSQL behavior from Kubernetes/CNPG behavior. It creates a
+primary plus synchronous standby, promotes the standby while leaving the old
+primary running, proves ordinary logged writes on the old primary block in
+`SyncRep`, then tests state classes that can still diverge or act independently:
+
+- unlogged relations
+- cached/prelogged sequence values
+- advisory locks
+- LISTEN/NOTIFY event streams
+- user-created physical replication slots
+
+Temporary relations are explicitly excluded in the generated result because they
+are session-local scratch state rather than durable cluster-visible split-brain
+state.
+
+```bash
+./split-brain-sim/pg-local-non-wal-split-brain-repro.sh
+```
+
+The last captured run is committed at:
+
+```text
+split-brain-sim/pg-local-non-wal-split-brain-results.md
+```
