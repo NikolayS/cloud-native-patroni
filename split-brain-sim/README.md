@@ -99,3 +99,20 @@ The last captured run is committed at:
 ```text
 split-brain-sim/pg-local-non-wal-split-brain-results.md
 ```
+
+## CNPG normal sync-rep unlogged `pg_cron` window hunt
+
+`cnpg-kind-sync-unlogged-cron-window-repro.sh` searches for an automatic two-writable-primary window under normal modern CNPG settings: `dataDurability: required`, `failoverQuorum: true`, and the default primary isolation liveness check enabled. It runs a database-internal `pg_cron` workload that calls a stored procedure once per second; the procedure inserts into an `UNLOGGED` table and commits after each row, defaulting to 100 commits/rows per tick. It then isolates the old primary's kind node.
+
+Intended cases:
+
+```bash
+INSTANCES=3 SYNC_NUMBER=1 COMMITS_PER_TICK=100 ./split-brain-sim/cnpg-kind-sync-unlogged-cron-window-repro.sh
+INSTANCES=5 SYNC_NUMBER=2 COMMITS_PER_TICK=100 ./split-brain-sim/cnpg-kind-sync-unlogged-cron-window-repro.sh
+```
+
+The captured 3-node `ANY 1` and 5-node `ANY 2` runs did not find overlapping old-primary and new-primary writes. See:
+
+```text
+split-brain-sim/cnpg-normal-sync-unlogged-cron-results.md
+```
