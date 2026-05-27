@@ -1,6 +1,6 @@
 # PostgreSQL non-WAL / split-brain-adjacent reproduction
 
-Generated: 2026-05-27 11:36:19 UTC
+Generated: 2026-05-27 11:45:10 UTC
 
 This local PostgreSQL reproduction promotes a synchronous standby while leaving
 old primary running.  It first proves a normal logged write on the old primary
@@ -12,7 +12,7 @@ blocks in `SyncRep`, then tests state classes that can still change or diverge.
 logged write exit code: 124
 ```
 
-Expected: non-zero exit from the client-side timeout while the old primary has no synchronous standby; pg_stat_activity showed the backend waiting in SyncRep.
+Expected: non-zero exit from the client-side timeout while the old primary has no synchronous standby; pg_stat_activity shows the backend waiting in SyncRep.
 
 ## 1. Unlogged relation divergence
 
@@ -75,15 +75,16 @@ LISTEN
 
 (1 row)
 
-Asynchronous notification "split_brain_chan" with payload "from promoted primary" received from server process with PID 76500.
+Asynchronous notification "split_brain_chan" with payload "from promoted primary" received from server process with PID 77041.
 ```
 
 Expected: the listener sees only the local promoted-primary notification, not the old-primary notification.
 
-## 5. Replication slots
+## 5. Physical and logical replication slots
 
 Old primary slots:
 ```text
+user_logical_slot|logical|f
 user_physical_slot|physical|f
 ```
 Promoted primary slots:
@@ -91,7 +92,7 @@ Promoted primary slots:
 <no slots>
 ```
 
-User-created physical replication slots are not ordinary WAL-replayed catalog rows; the slot created after basebackup remains only on the old primary.
+User-created physical and logical replication slots are not ordinary WAL-replayed catalog rows; slots created after basebackup remain only on the old primary. PostgreSQL newer than this local test has explicit failover logical slots, but ordinary logical slots still need that failover/synchronization path to survive promotion.
 
 ## Explicitly excluded: temporary relations
 
@@ -99,4 +100,4 @@ Temporary relation data can bypass WAL/SyncRep, but it is session-local and not 
 
 ## Raw logs
 
-Run logs were captured under: `/tmp/pg-nonwal-split-brain.Muk3r9/logs`
+Run logs were captured under: `/tmp/pg-nonwal-split-brain.gGBSl7/logs`

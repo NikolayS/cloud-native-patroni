@@ -83,7 +83,7 @@ primary running, proves ordinary logged writes on the old primary block in
 - cached/prelogged sequence values
 - advisory locks
 - LISTEN/NOTIFY event streams
-- user-created physical replication slots
+- user-created physical and logical replication slots
 
 Temporary relations are explicitly excluded in the generated result because they
 are session-local scratch state rather than durable cluster-visible split-brain

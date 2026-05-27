@@ -113,8 +113,9 @@ INSERT INTO unlogged_probe(origin, note) VALUES ('primary', 'baseline unlogged r
 -- First nextval emits a sequence WAL record that pre-logs future values.
 SELECT nextval('split_seq') AS first_nextval_prelogs_future_values;
 SQL
-# Create this after basebackup so it proves user slot state is not WAL-replayed.
-psql_primary -qAt -c "SELECT * FROM pg_create_physical_replication_slot('user_physical_slot');" | tee "$LOGDIR/create-slot.txt"
+# Create these after basebackup so they prove user slot state is not WAL-replayed.
+psql_primary -qAt -c "SELECT * FROM pg_create_physical_replication_slot('user_physical_slot');" | tee "$LOGDIR/create-physical-slot.txt"
+psql_primary -qAt -c "SELECT * FROM pg_create_logical_replication_slot('user_logical_slot', 'pgoutput');" | tee "$LOGDIR/create-logical-slot.txt"
 psql_primary -qAt -c "INSERT INTO logged_probe(origin, note) VALUES ('primary', 'flush before promote'); SELECT pg_current_wal_lsn();" >/dev/null
 sleep 1
 
@@ -165,7 +166,7 @@ wait "$listener2"
 cat "$LOGDIR/listener-new-during-old-notify.out" | tee -a "$LOGDIR/run.log"
 cat "$LOGDIR/listener-new-during-new-notify.out" | tee -a "$LOGDIR/run.log"
 
-log "Test 5: user-created physical replication slot exists only on old primary"
+log "Test 5: user-created physical and logical replication slots exist only on old primary"
 psql_primary -qAt -c "SELECT slot_name, slot_type, active FROM pg_replication_slots ORDER BY slot_name;" | tee "$LOGDIR/slots-old.txt"
 psql_new -qAt -c "SELECT coalesce(string_agg(slot_name || ':' || slot_type, ',' ORDER BY slot_name), '<no slots>') FROM pg_replication_slots;" | tee "$LOGDIR/slots-new.txt"
 
@@ -214,14 +215,14 @@ log "Write markdown results"
   echo
   echo "Expected: the listener sees only the local promoted-primary notification, not the old-primary notification."
   echo
-  echo "## 5. Replication slots"
+  echo "## 5. Physical and logical replication slots"
   echo
   echo "Old primary slots:"
   echo '```text'; cat "$LOGDIR/slots-old.txt"; echo '```'
   echo "Promoted primary slots:"
   echo '```text'; cat "$LOGDIR/slots-new.txt"; echo '```'
   echo
-  echo "User-created physical replication slots are not ordinary WAL-replayed catalog rows; the slot created after basebackup remains only on the old primary."
+  echo "User-created physical and logical replication slots are not ordinary WAL-replayed catalog rows; slots created after basebackup remain only on the old primary. PostgreSQL newer than this local test has explicit failover logical slots, but ordinary logical slots still need that failover/synchronization path to survive promotion."
   echo
   echo "## Explicitly excluded: temporary relations"
   echo
