@@ -140,3 +140,27 @@ See:
 ```text
 split-brain-sim/cnpg-sync5-kubelet-dead-results.md
 ```
+
+## CNPG logged-table kubelet/fencing experiments
+
+`cnpg-kind-sync6-logged-kubelet-fencing-repro.sh` is the sharper logged-data
+variant. It creates a 6-instance cluster with synchronous replication `ANY 2`,
+keeps the old primary connected to two synchronous standbys so ordinary
+`logged_loop_probe` inserts can commit with `synchronous_commit=on`, then stops
+kubelet on the old-primary node and force-deletes the old-primary Pod object.
+
+Two outcomes are captured:
+
+- With default `failoverQuorum: true`, CNPG did not promote. The failover quorum
+  check rejected the promotion because the promotion side had only three
+  candidates from a five-name synchronous standby set: `3 + 2 > 5` is false.
+- With `failoverQuorum: false`, CNPG promoted another primary and both sides
+  committed ordinary WAL-backed rows for minutes. This proves synchronous
+  replication by itself is not fencing; the failover-quorum and kubelet/fencing
+  layers are what prevent this logged-data case.
+
+See:
+
+```text
+split-brain-sim/cnpg-sync6-logged-kubelet-fencing-results.md
+```
