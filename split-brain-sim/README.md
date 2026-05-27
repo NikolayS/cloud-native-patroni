@@ -83,6 +83,7 @@ primary running, proves ordinary logged writes on the old primary block in
 - cached/prelogged sequence values
 - advisory locks
 - LISTEN/NOTIFY event streams
+- logical decoding of a logged-table transaction while its client is still blocked in SyncRep
 - user-created physical and logical replication slots
 
 Temporary relations are explicitly excluded in the generated result because they

@@ -116,6 +116,7 @@ SQL
 # Create these after basebackup so they prove user slot state is not WAL-replayed.
 psql_primary -qAt -c "SELECT * FROM pg_create_physical_replication_slot('user_physical_slot');" | tee "$LOGDIR/create-physical-slot.txt"
 psql_primary -qAt -c "SELECT * FROM pg_create_logical_replication_slot('user_logical_slot', 'pgoutput');" | tee "$LOGDIR/create-logical-slot.txt"
+psql_primary -qAt -c "SELECT * FROM pg_create_logical_replication_slot('user_logical_decode_slot', 'test_decoding');" | tee "$LOGDIR/create-logical-decode-slot.txt"
 psql_primary -qAt -c "INSERT INTO logged_probe(origin, note) VALUES ('primary', 'flush before promote'); SELECT pg_current_wal_lsn();" >/dev/null
 sleep 1
 
@@ -124,12 +125,19 @@ run pg_ctl -D "$STANDBY" promote -w >/dev/null
 wait_sql "$STANDBY_PORT" "SELECT NOT pg_is_in_recovery();" | tee "$LOGDIR/promoted.txt"
 
 log "Control: normal logged write on old primary blocks in SyncRep"
-set +e
-timeout 3s psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p "$PRIMARY_PORT" -d "$PGDATABASE" -qAt -c "INSERT INTO logged_probe(origin, note) VALUES ('old-primary', 'logged write should block');" >"$LOGDIR/logged-write.out" 2>"$LOGDIR/logged-write.err"
-logged_rc=$?
-set -e
+psql -X -v ON_ERROR_STOP=1 -h 127.0.0.1 -p "$PRIMARY_PORT" -d "$PGDATABASE" -qAt -c "INSERT INTO logged_probe(origin, note) VALUES ('old-primary', 'logged write should block');" >"$LOGDIR/logged-write.out" 2>"$LOGDIR/logged-write.err" &
+logged_client_pid=$!
+sleep 2
+if kill -0 "$logged_client_pid" >/dev/null 2>&1; then
+  logged_rc="still waiting"
+else
+  logged_rc="exited early"
+fi
 cat "$LOGDIR/logged-write.err" | tee -a "$LOGDIR/run.log"
 psql_primary -x -c "SELECT pid, wait_event_type, wait_event, state, left(query,120) AS query FROM pg_stat_activity WHERE wait_event = 'SyncRep' OR query LIKE '%logged write should block%';" | tee "$LOGDIR/logged-waiters.txt"
+psql_primary -qAt -c "SELECT lsn, xid, data FROM pg_logical_slot_get_changes('user_logical_decode_slot', NULL, NULL);" | tee "$LOGDIR/logical-decodes-blocked-syncrep.txt"
+kill "$logged_client_pid" >/dev/null 2>&1 || true
+wait "$logged_client_pid" >/dev/null 2>&1 || true
 
 log "Test 1: unlogged relation diverges"
 psql_primary -qAt -c "SET statement_timeout = '2500ms'; INSERT INTO unlogged_probe(origin, note) SELECT 'old-primary', 'unlogged row ' || g FROM generate_series(1,3) g; SELECT origin, count(*) FROM unlogged_probe GROUP BY origin ORDER BY origin;" | tee "$LOGDIR/unlogged-old.txt"
@@ -175,11 +183,16 @@ log "Write markdown results"
   echo "## Control: logged writes block"
   echo
   echo '```text'
-  echo "logged write exit code: $logged_rc"
+  echo "logged write client state after 2s: $logged_rc"
   cat "$LOGDIR/logged-write.err"
   echo '```'
   echo
-  echo "Expected: non-zero exit from the client-side timeout while the old primary has no synchronous standby; pg_stat_activity shows the backend waiting in SyncRep."
+  echo "Expected: the client remains blocked while pg_stat_activity shows the backend waiting in SyncRep."
+  echo
+  echo "Logical decoding from the old primary while that client is still blocked:"
+  echo '```text'; cat "$LOGDIR/logical-decodes-blocked-syncrep.txt"; echo '```'
+  echo
+  echo "Important: the blocked transaction is already present in logical decoding on the old primary, even though the client has not received a synchronous-commit acknowledgement. A logical subscriber connected to the old primary can therefore consume a doomed-timeline logged-table change during the split-brain window."
   echo
   echo "## 1. Unlogged relation divergence"
   echo
