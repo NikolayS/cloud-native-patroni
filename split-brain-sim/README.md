@@ -116,3 +116,27 @@ The captured 3-node `ANY 1` and 5-node `ANY 2` runs did not find overlapping old
 ```text
 split-brain-sim/cnpg-normal-sync-unlogged-cron-results.md
 ```
+
+## CNPG synchronous-replication kubelet/fencing-failure split-brain result
+
+`cnpg-kind-sync5-kubelet-dead-repro.sh` tests a harsher failure mode: a
+5-instance CNPG cluster with synchronous replication `ANY 2`,
+`dataDurability: required`, `failoverQuorum: true`, and default isolation
+liveness enabled, but with kubelet/probe enforcement stopped on the old-primary
+node before the old primary Pod object is force-deleted from the Kubernetes API.
+
+This simulates the leadership side of the failure: Kubernetes/CNPG can promote a
+new primary because the old-primary Pod has disappeared from API state, while the
+old PostgreSQL container/process is not fenced by kubelet and continues running
+on the old node.
+
+The captured run found overlapping SQL-writable primaries: Kubernetes/CNPG
+promoted `splitbrain-4`, while the directly reached old primary `splitbrain-1`
+remained `pg_is_in_recovery = false` and continued accepting local unlogged
+writes for the full observation window.
+
+See:
+
+```text
+split-brain-sim/cnpg-sync5-kubelet-dead-results.md
+```
