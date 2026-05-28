@@ -1,0 +1,170 @@
+
+[1;36m==> Create kind cluster with 7 nodes[0m
++ kind create cluster --name cnpg-sync6-logged-fq-skew --config /tmp/cnpg-sync6-logged-fq-skew-kind.yaml
+
+[1;36m==> Install CNPG[0m
++ kubectl apply --server-side -f releases/cnpg-1.29.1.yaml
++ kubectl -n cnpg-system rollout status deployment/cnpg-controller-manager --timeout=180s
++ kubectl create namespace cnpg-sync6-logged-fq-skew
++ kubectl apply -n cnpg-sync6-logged-fq-skew -f /tmp/cnpg-sync6-logged-fq-skew-cluster.yaml
++ kubectl wait -n cnpg-sync6-logged-fq-skew --for=condition=Ready cluster/splitbrain --timeout=1200s
+
+[1;36m==> Create logged table and launch pod-local synchronous write loops[0m
+
+[1;36m==> Pick two sync standbys to stay with old primary[0m
+
+[1;36m==> Apply surgical side-A partition preserving old primary <-> two kept standbys[0m
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.3.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.6.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.1.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.3.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.6.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.1.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.3.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.6.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.1.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.3.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.6.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.1.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.3.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.6.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.1.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.3.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.6.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.1.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.3.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.6.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.0.0/16 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.0.0/16 -d 10.244.1.4 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I OUTPUT 1 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I OUTPUT 1 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I OUTPUT 1 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I OUTPUT 1 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I OUTPUT 1 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I OUTPUT 1 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.3.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.6.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker4 iptables -I FORWARD 1 -s 10.244.1.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.3.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.3.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.6.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.6.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.1.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-control-plane iptables -I FORWARD 1 -s 10.244.1.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.3.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.6.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker3 iptables -I FORWARD 1 -s 10.244.1.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.3.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.6.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker2 iptables -I FORWARD 1 -s 10.244.1.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.3.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.6.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker6 iptables -I FORWARD 1 -s 10.244.1.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.3.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.3.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.6.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.6.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.1.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker iptables -I FORWARD 1 -s 10.244.1.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.3.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.3.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.6.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.6.4 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.1.4 -d 10.96.0.1 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
++ docker exec cnpg-sync6-logged-fq-skew-worker5 iptables -I FORWARD 1 -s 10.244.1.4 -p tcp --dport 6443 -j DROP
++ kubectl patch failoverquorum -n cnpg-sync6-logged-fq-skew splitbrain --subresource=status --type=merge -p {"status": {"method": "any", "primary": "splitbrain-1", "standbyNumber": 2, "standbyNames": ["splitbrain-4", "splitbrain-5", "splitbrain-6"]}}
+
+[1;36m==> Stop kubelet on kept-standby nodes and force-delete their Pod objects while preserving containers[0m
++ docker exec cnpg-sync6-logged-fq-skew-worker3 bash -lc systemctl stop kubelet || true; systemctl disable kubelet || true; pkill -9 kubelet || true; systemctl is-active kubelet || true; ps -ef | grep kubelet | grep -v grep || true
++ kubectl delete pod -n cnpg-sync6-logged-fq-skew splitbrain-2 --grace-period=0 --force
++ docker exec cnpg-sync6-logged-fq-skew-worker2 bash -lc systemctl stop kubelet || true; systemctl disable kubelet || true; pkill -9 kubelet || true; systemctl is-active kubelet || true; ps -ef | grep kubelet | grep -v grep || true
++ kubectl delete pod -n cnpg-sync6-logged-fq-skew splitbrain-3 --grace-period=0 --force
+
+[1;36m==> Stop kubelet service on old-primary node to remove probe/fencing enforcement[0m
++ docker exec cnpg-sync6-logged-fq-skew-worker5 bash -lc systemctl stop kubelet || true; systemctl disable kubelet || true; pkill -9 kubelet || true; systemctl is-active kubelet || true; ps -ef | grep kubelet | grep -v grep || true
+
+[1;36m==> Force-delete old-primary Pod object while kubelet is stopped; container should keep running[0m
++ kubectl delete pod -n cnpg-sync6-logged-fq-skew splitbrain-1 --grace-period=0 --force
+
+[1;36m==> Heal partition[0m

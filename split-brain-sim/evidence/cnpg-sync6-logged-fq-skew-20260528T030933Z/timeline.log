@@ -1,0 +1,12 @@
+2026-05-27T20:18:02-0700 old primary=splitbrain-1 node=cnpg-sync6-logged-fq-skew-worker5 ip=10.244.3.4
+2026-05-27T20:18:18-0700 keep-with-old=splitbrain-2 splitbrain-3 keep_ips=10.244.6.4 10.244.1.4 sync_set=splitbrain-2 splitbrain-3 splitbrain-4 splitbrain-5 splitbrain-6
+2026-05-27T20:18:18-0700 partition-start sideA=splitbrain-1,splitbrain-2 splitbrain-3 primary_node_ip=192.168.208.14 control_plane_ip=192.168.208.12
+2026-05-27T20:19:05-0700 skew-failoverquorum promotion_side=splitbrain-4 splitbrain-5 splitbrain-6
+2026-05-27T20:19:05-0700 stop-kubelet-service kept-standby=splitbrain-2 node=cnpg-sync6-logged-fq-skew-worker3
+2026-05-27T20:19:07-0700 force-delete-kept-standby-pod=splitbrain-2
+2026-05-27T20:19:07-0700 stop-kubelet-service kept-standby=splitbrain-3 node=cnpg-sync6-logged-fq-skew-worker2
+2026-05-27T20:19:08-0700 force-delete-kept-standby-pod=splitbrain-3
+2026-05-27T20:19:11-0700 stop-kubelet-service node=cnpg-sync6-logged-fq-skew-worker5
+2026-05-27T20:19:13-0700 force-delete-old-primary-pod
+2026-05-27T20:20:24-0700 new-primary-observed=splitbrain-4 at_second=18
+2026-05-27T20:28:58-0700 partition-end

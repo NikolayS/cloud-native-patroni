@@ -1,0 +1,139 @@
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.3.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.0.0/16 -d 10.244.3.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.6.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.0.0/16 -d 10.244.6.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.1.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.0.0/16 -d 10.244.1.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.3.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.0.0/16 -d 10.244.3.4 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.6.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.0.0/16 -d 10.244.6.4 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.1.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.0.0/16 -d 10.244.1.4 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.3.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.0.0/16 -d 10.244.3.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.6.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.0.0/16 -d 10.244.6.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.1.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.0.0/16 -d 10.244.1.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.3.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.0.0/16 -d 10.244.3.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.6.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.0.0/16 -d 10.244.6.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.1.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.0.0/16 -d 10.244.1.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.3.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.0.0/16 -d 10.244.3.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.6.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.0.0/16 -d 10.244.6.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.1.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.0.0/16 -d 10.244.1.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.3.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.0.0/16 -d 10.244.3.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.6.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.0.0/16 -d 10.244.6.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.1.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.0.0/16 -d 10.244.1.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.3.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.0.0/16 -d 10.244.3.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.6.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.0.0/16 -d 10.244.6.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.1.4 -d 10.244.0.0/16 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.0.0/16 -d 10.244.1.4 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.3.4 -d 10.244.6.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.6.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.3.4 -d 10.244.1.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.1.4 -d 10.244.3.4 -j ACCEPT
+cnpg-sync6-logged-fq-skew-worker5|OUTPUT|-d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|OUTPUT|-d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|OUTPUT|-d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|OUTPUT|-d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|OUTPUT|-d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|OUTPUT|-d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.3.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.3.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.6.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.6.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.1.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker4|FORWARD|-s 10.244.1.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.3.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.3.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.6.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.6.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.1.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-control-plane|FORWARD|-s 10.244.1.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.3.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.3.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.6.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.6.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.1.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker3|FORWARD|-s 10.244.1.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.3.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.3.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.6.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.6.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.1.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker2|FORWARD|-s 10.244.1.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.3.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.3.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.6.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.6.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.1.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker6|FORWARD|-s 10.244.1.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.3.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.3.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.6.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.6.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.1.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker|FORWARD|-s 10.244.1.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.3.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.3.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.3.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.6.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.6.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.6.4 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.1.4 -d 10.96.0.1 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.1.4 -d 192.168.208.12 -p tcp --dport 6443 -j DROP
+cnpg-sync6-logged-fq-skew-worker5|FORWARD|-s 10.244.1.4 -p tcp --dport 6443 -j DROP

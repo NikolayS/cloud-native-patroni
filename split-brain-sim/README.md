@@ -164,3 +164,25 @@ See:
 ```text
 split-brain-sim/cnpg-sync6-logged-kubelet-fencing-results.md
 ```
+
+## CNPG logged-table failover-quorum status-skew experiment
+
+`cnpg-kind-sync6-logged-fq-skew-repro.sh` extends the logged-data test with
+`failoverQuorum: true` still enabled, but injects a stale/skewed
+`FailoverQuorum.Status` that lists only the promotion-side standbys. It then
+stops kubelet on the old side and force-deletes the old-side Pod objects while
+preserving the old primary's PostgreSQL process and its two actual synchronous
+standbys.
+
+The captured run promoted `splitbrain-4` while the old primary `splitbrain-1`
+continued committing ordinary WAL-backed `logged_loop_probe` rows with
+`synchronous_commit=on` against `splitbrain-2` and `splitbrain-3`.
+
+This is intentionally framed as an injected metadata-skew repro, not yet proof
+that CNPG naturally produces that skew.
+
+See:
+
+```text
+split-brain-sim/cnpg-sync6-logged-fq-skew-results.md
+```
