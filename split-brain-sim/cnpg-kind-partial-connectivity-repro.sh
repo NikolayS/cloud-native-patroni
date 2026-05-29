@@ -78,7 +78,9 @@ set -Eeuo pipefail
 CLUSTER_NAME=${CLUSTER_NAME:-cnpg-partial-conn}
 NAMESPACE=${NAMESPACE:-$CLUSTER_NAME}
 PG_CLUSTER=${PG_CLUSTER:-splitbrain}
-CNPG_MANIFEST=${CNPG_MANIFEST:-releases/cnpg-1.29.1.yaml}
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CNPG_MANIFEST=${CNPG_MANIFEST:-$REPO_ROOT/releases/cnpg-1.29.1.yaml}
 # PG18 image. Adjust tag if CNPG image catalog has a different one available.
 PG_IMAGE=${PG_IMAGE:-ghcr.io/cloudnative-pg/postgresql:18.0-bookworm}
 PG_STATUS_PORT=${PG_STATUS_PORT:-9187}    # CNPG instance-manager status port
