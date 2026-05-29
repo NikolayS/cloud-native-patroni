@@ -1,0 +1,238 @@
+# 5-node, 2-network compose for the partial-connectivity split-brain demo.
+#
+# Topology:
+#   net-a (primary side):       primary, replica3, replica4
+#   net-b (operator side):      replica1, replica2, replica3, replica4
+#
+#   replica3 and replica4 are attached to BOTH networks — they are the
+#   "overlapping" replicas that can flip from reachable to unreachable
+#   from the operator side while still being connected to the primary.
+#
+# The primary listens on net-a. replica1/replica2 reach the primary via
+# replica3/replica4 acting as routes? No — Docker bridge networks are
+# isolated. replica1/replica2 are intentionally on net-b only; they will
+# only have a path to the primary while the demonstration script keeps
+# the primary attached to net-b. Once the script disconnects the primary
+# from net-b (Stage 1 of the partition), replica1/replica2 fall behind
+# while replica3/replica4 keep streaming via net-a.
+#
+# All replicas are seeded via pg_basebackup against the primary's net-b
+# address during the initial setup, then sync replication is configured.
+
+services:
+  primary:
+    image: ${PG_IMAGE:-postgres:18beta1}
+    container_name: sb5-primary
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST_AUTH_METHOD: md5
+      PGDATA: /tmp/pgdata
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - synchronous_commit=on
+      - -c
+      - hot_standby=on
+      - -c
+      - wal_log_hints=on
+      - -c
+      - wal_keep_size=1GB
+      - -c
+      - listen_addresses=*
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 10
+    volumes:
+      - primary-data:/tmp/pgdata
+    networks:
+      - net-a
+      - net-b
+
+  replica1:
+    image: ${PG_IMAGE:-postgres:18beta1}
+    container_name: sb5-replica1
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGPASSWORD: repl_secret
+      PGDATA: /tmp/pgdata
+    depends_on:
+      primary:
+        condition: service_healthy
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - |
+        rm -rf "$$PGDATA"/*
+        until PGPASSWORD=repl_secret pg_basebackup -h sb5-primary -U replicator \
+            -D "$$PGDATA" -Fp -Xs -P -R \
+            --slot=slot_replica1 2>&1; do
+          echo "Waiting for primary..."
+          sleep 2
+        done
+        echo "primary_slot_name = 'slot_replica1'" >> "$$PGDATA/postgresql.auto.conf"
+        echo "cluster_name = 'replica1'" >> "$$PGDATA/postgresql.auto.conf"
+        chown -R postgres:postgres "$$PGDATA"
+        chmod 700 "$$PGDATA"
+        exec docker-entrypoint.sh postgres \
+          -c hot_standby=on \
+          -c wal_log_hints=on \
+          -c wal_keep_size=1GB \
+          -c cluster_name=replica1
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - replica1-data:/tmp/pgdata
+    networks:
+      - net-b
+
+  replica2:
+    image: ${PG_IMAGE:-postgres:18beta1}
+    container_name: sb5-replica2
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGPASSWORD: repl_secret
+      PGDATA: /tmp/pgdata
+    depends_on:
+      primary:
+        condition: service_healthy
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - |
+        rm -rf "$$PGDATA"/*
+        until PGPASSWORD=repl_secret pg_basebackup -h sb5-primary -U replicator \
+            -D "$$PGDATA" -Fp -Xs -P -R \
+            --slot=slot_replica2 2>&1; do
+          echo "Waiting for primary..."
+          sleep 2
+        done
+        echo "primary_slot_name = 'slot_replica2'" >> "$$PGDATA/postgresql.auto.conf"
+        echo "cluster_name = 'replica2'" >> "$$PGDATA/postgresql.auto.conf"
+        chown -R postgres:postgres "$$PGDATA"
+        chmod 700 "$$PGDATA"
+        exec docker-entrypoint.sh postgres \
+          -c hot_standby=on \
+          -c wal_log_hints=on \
+          -c wal_keep_size=1GB \
+          -c cluster_name=replica2
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - replica2-data:/tmp/pgdata
+    networks:
+      - net-b
+
+  replica3:
+    image: ${PG_IMAGE:-postgres:18beta1}
+    container_name: sb5-replica3
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGPASSWORD: repl_secret
+      PGDATA: /tmp/pgdata
+    depends_on:
+      primary:
+        condition: service_healthy
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - |
+        rm -rf "$$PGDATA"/*
+        until PGPASSWORD=repl_secret pg_basebackup -h sb5-primary -U replicator \
+            -D "$$PGDATA" -Fp -Xs -P -R \
+            --slot=slot_replica3 2>&1; do
+          echo "Waiting for primary..."
+          sleep 2
+        done
+        echo "primary_slot_name = 'slot_replica3'" >> "$$PGDATA/postgresql.auto.conf"
+        echo "cluster_name = 'replica3'" >> "$$PGDATA/postgresql.auto.conf"
+        chown -R postgres:postgres "$$PGDATA"
+        chmod 700 "$$PGDATA"
+        exec docker-entrypoint.sh postgres \
+          -c hot_standby=on \
+          -c wal_log_hints=on \
+          -c wal_keep_size=1GB \
+          -c cluster_name=replica3
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - replica3-data:/tmp/pgdata
+    networks:
+      - net-a
+      - net-b
+
+  replica4:
+    image: ${PG_IMAGE:-postgres:18beta1}
+    container_name: sb5-replica4
+    environment:
+      POSTGRES_PASSWORD: postgres
+      PGPASSWORD: repl_secret
+      PGDATA: /tmp/pgdata
+    depends_on:
+      primary:
+        condition: service_healthy
+    entrypoint: []
+    command:
+      - bash
+      - -c
+      - |
+        rm -rf "$$PGDATA"/*
+        until PGPASSWORD=repl_secret pg_basebackup -h sb5-primary -U replicator \
+            -D "$$PGDATA" -Fp -Xs -P -R \
+            --slot=slot_replica4 2>&1; do
+          echo "Waiting for primary..."
+          sleep 2
+        done
+        echo "primary_slot_name = 'slot_replica4'" >> "$$PGDATA/postgresql.auto.conf"
+        echo "cluster_name = 'replica4'" >> "$$PGDATA/postgresql.auto.conf"
+        chown -R postgres:postgres "$$PGDATA"
+        chmod 700 "$$PGDATA"
+        exec docker-entrypoint.sh postgres \
+          -c hot_standby=on \
+          -c wal_log_hints=on \
+          -c wal_keep_size=1GB \
+          -c cluster_name=replica4
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+    volumes:
+      - replica4-data:/tmp/pgdata
+    networks:
+      - net-a
+      - net-b
+
+networks:
+  net-a:
+    name: splitbrain-net-a
+    driver: bridge
+  net-b:
+    name: splitbrain-net-b
+    driver: bridge
+
+volumes:
+  primary-data:
+  replica1-data:
+  replica2-data:
+  replica3-data:
+  replica4-data:

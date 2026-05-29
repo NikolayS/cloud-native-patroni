@@ -27,6 +27,21 @@ docker compose down -v
 ./simulate.sh --cleanup
 ```
 
+A synchronous-replication variant:
+
+```bash
+./simulate-sync.sh
+```
+
+A partial-connectivity, 5-node, 2-network variant that demonstrates how
+sync-committed-and-ACK'd transactions can still be lost when the
+operator's vantage point overlaps the primary's via shared replicas:
+
+```bash
+./simulate-partial-connectivity.sh
+docker compose -f docker-compose-5node.yml down -v
+```
+
 ## What the output shows
 
 - Initial replicated baseline rows
@@ -37,6 +52,19 @@ docker compose down -v
 - Divergent row counts confirming split brain
 - `pg_rewind` of the old primary onto the promoted primary timeline
 - Old-primary partition writes absent after rewind
+
+For the partial-connectivity variant specifically:
+
+- Five nodes (`P, R1, R2, R3, R4`) on two Docker networks (`net-a`, `net-b`)
+- `R3` and `R4` are dual-homed (the "overlap" replicas)
+- Sync replication with `synchronous_standby_names = 'ANY 2 (...)'`
+- A two-stage partition where the operator sees only stale replicas
+  at the moment of promotion while the primary is still satisfying its
+  quorum on the other side
+- The most-advanced reachable replica from the operator's vantage point
+  is the WRONG one to promote
+- `pg_rewind` on `R3`, `R4`, and `P` onto the promoted replica's timeline
+  discards transactions that were synchronously committed AND ACK'd
 
 ## CloudNativePG/kind reproduction for upstream #7407
 
@@ -70,3 +98,5 @@ Useful knobs:
 EVENTS_PER_SECOND=1000 PARTITION_SECONDS=30 ./split-brain-sim/cnpg-kind-pgque-repro.sh
 KEEP_CLUSTER=1 ./split-brain-sim/cnpg-kind-pgque-repro.sh
 ```
+
+_Authorship note: written with assistance from AI._
