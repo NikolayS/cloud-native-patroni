@@ -112,12 +112,14 @@ git config rerere.autoUpdate false
 driver="$(git rev-parse --path-format=absolute --git-common-dir)/cnpatroni/cnpatroni-upstream"
 go build -C hack/cnpatroni/upstream -o "$driver" ./cmd/cnpatroni-upstream
 git config merge.cnpatroni-boundary.name "CloudNativePatroni boundary guard"
-git config merge.cnpatroni-boundary.driver "$driver merge-driver %O %A %B %L %P"
+git config merge.cnpatroni-boundary.driver "'$driver' merge-driver '%O' '%A' '%B' '%L' '%P'"
 ```
 
 The driver command has to be an absolute path and must not change directory:
 git substitutes `%O %A %B` with temporary file names relative to the repository
-root, so a driver wrapped in a `cd` cannot open them.
+root, so a driver wrapped in a `cd` cannot open them. Git runs the command
+through a shell, so the path and placeholders are single-quoted; a clone path
+containing a single quote or a newline is not supported.
 
 In CI, check out with `fetch-depth: 0` and then run `setup`; a shallow checkout
 cannot answer the drift question and the tool will say so rather than reporting

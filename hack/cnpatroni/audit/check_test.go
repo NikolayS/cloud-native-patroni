@@ -291,9 +291,10 @@ func TestCheckReportsUnclassifiedFindingsByName(t *testing.T) {
 	res := result([]Finding{
 		{Rule: "proc.promote", Severity: SeverityForbidden, Symbol: "pkg.A", Path: "a.go", Line: 3, Col: 2},
 	}, "pkg.A")
+	rules := ruleSetForFindings(res)
 	cls := &Classification{Schema: classificationSchema}
 
-	report := Check(res, cls, emptyBaseline(), "M0")
+	report := Check(rules, res, cls, emptyBaseline(rules, res), "M0")
 
 	if len(report.Violations) == 0 {
 		t.Fatal("an unclassified forbidden finding produced no violation")
@@ -311,8 +312,9 @@ func TestCheckDoesNotRequireClassificationForObserveFindings(t *testing.T) {
 	res := result([]Finding{
 		{Rule: "role.current-primary-read", Severity: SeverityObserve, Symbol: "pkg.B", Path: "b.go"},
 	}, "pkg.B")
+	rules := ruleSetForFindings(res)
 
-	report := Check(res, &Classification{Schema: classificationSchema}, emptyBaseline(), "M0")
+	report := Check(rules, res, &Classification{Schema: classificationSchema}, emptyBaseline(rules, res), "M0")
 
 	if len(report.Violations) != 0 {
 		t.Errorf("an observe finding produced violations: %v", report.Violations)
@@ -326,6 +328,7 @@ func TestCheckHonoursTheAllowList(t *testing.T) {
 			Symbol: "pkg/postgres.fixed", Path: "pkg/postgres/configuration.go", Package: "pkg/postgres",
 		},
 	}, "pkg/postgres.fixed")
+	rules := ruleSetForFindings(res)
 	cls := &Classification{
 		Schema: classificationSchema,
 		Allow: []AllowEntry{{
@@ -337,7 +340,7 @@ func TestCheckHonoursTheAllowList(t *testing.T) {
 		}},
 	}
 
-	report := Check(res, cls, emptyBaseline(), "M0")
+	report := Check(rules, res, cls, emptyBaseline(rules, res), "M0")
 
 	if len(report.Violations) != 0 {
 		t.Errorf("an allowed finding produced violations: %v", report.Violations)
@@ -345,6 +348,8 @@ func TestCheckHonoursTheAllowList(t *testing.T) {
 }
 
 func TestCheckExpiresAllowListEntries(t *testing.T) {
+	res := result(nil)
+	rules := ruleSetForFindings(res)
 	cls := &Classification{
 		Schema: classificationSchema,
 		Allow: []AllowEntry{{
@@ -357,7 +362,7 @@ func TestCheckExpiresAllowListEntries(t *testing.T) {
 		}},
 	}
 
-	report := Check(result(nil), cls, emptyBaseline(), "M2")
+	report := Check(rules, res, cls, emptyBaseline(rules, res), "M2")
 
 	if !containsSubstring(report.Violations, "expired") {
 		t.Errorf("an allowlist entry past its milestone did not expire: %v", report.Violations)
@@ -365,6 +370,7 @@ func TestCheckExpiresAllowListEntries(t *testing.T) {
 }
 
 func TestCheckComparesAgainstTheBaseline(t *testing.T) {
+	rules := ruleSet("proc.promote")
 	forbidden := func(symbol string, n int) []Finding {
 		out := make([]Finding, 0, n)
 		for range n {
@@ -403,7 +409,8 @@ func TestCheckComparesAgainstTheBaseline(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			report := Check(result(tc.findings, "pkg.A"), classified, baseline, "M0")
+			res := result(tc.findings, "pkg.A")
+			report := Check(rules, res, classified, baselineWithInputs(baseline, rules, res), "M0")
 
 			if tc.wantViolation == "" {
 				if len(report.Violations) != 0 {
@@ -448,8 +455,10 @@ func TestCheckFlagsAForbiddenCallInAFileAlreadyOnTheBaseline(t *testing.T) {
 		{Rule: "proc.promote", Severity: SeverityForbidden, Symbol: "pkg.Old", Path: "a.go", Line: 10},
 		{Rule: "proc.promote", Severity: SeverityForbidden, Symbol: "pkg.New", Path: "a.go", Line: 40},
 	}
+	rules := ruleSet("proc.promote")
+	res := result(findings, "pkg.Old", "pkg.New")
 
-	report := Check(result(findings, "pkg.Old", "pkg.New"), cls, baseline, "M0")
+	report := Check(rules, res, cls, baselineWithInputs(baseline, rules, res), "M0")
 
 	if !containsSubstring(report.Violations, "new forbidden call") {
 		t.Errorf("a new forbidden call in an already-baselined file was not reported: %v", report.Violations)
@@ -466,8 +475,10 @@ func TestBuildBaselineCountsOnlyForbiddenFindings(t *testing.T) {
 		{Rule: "guard.call", Severity: SeverityInventory, Symbol: "pkg.B"},
 		{Rule: "role.read", Severity: SeverityObserve, Symbol: "pkg.C"},
 	}
+	res := result(findings)
+	rules := ruleSetForFindings(res)
 
-	baseline := BuildBaseline(findings, "abc123", "2026-08-09 23:20:00 UTC")
+	baseline := BuildBaseline(rules, res, findings, 1, "abc123", "2026-08-09 23:20:00 UTC")
 
 	if baseline.Total != 2 {
 		t.Errorf("total = %d, want 2", baseline.Total)
@@ -478,15 +489,34 @@ func TestBuildBaselineCountsOnlyForbiddenFindings(t *testing.T) {
 	if baseline.TotalsByRule["proc.promote"] != 2 {
 		t.Errorf("totals_by_rule = %v", baseline.TotalsByRule)
 	}
+	if baseline.AllowedTotal != 1 {
+		t.Errorf("allowed_total = %d, want 1", baseline.AllowedTotal)
+	}
+	if differences := inputDifferences(baseline.Inputs, Fingerprint(rules, res)); len(differences) != 0 {
+		t.Errorf("baseline inputs do not match the measurement: %v", differences)
+	}
 }
 
 func TestLoadBaselineRejectsDishonestCounts(t *testing.T) {
-	valid := `schema: cnpatroni-authority-baseline/v1
+	valid := `schema: cnpatroni-authority-baseline/v2
 generated_from: abc123
 generated_at: 2026-08-09 23:20:00 UTC
 total: 1
+allowed_total: 0
 totals_by_rule:
   proc.promote: 1
+inputs:
+  scope:
+    roots: [.]
+    exclude_paths: []
+    exclude_generated: false
+    include_tests: false
+  rules:
+    - id: proc.promote
+      severity: forbidden
+      matchers: ["call:example.com/pg.Promote"]
+  packages: 1
+  files: 1
 buckets:
   - rule: proc.promote
     symbol: pkg.A
@@ -525,6 +555,11 @@ buckets:
 			body:    replaceOnce(valid, "symbol: pkg.A", "symbol: \"\""),
 			wantErr: "has no symbol",
 		},
+		{
+			name:    "rule total absent from input fingerprint",
+			body:    replaceOnce(valid, "    - id: proc.promote\n      severity: forbidden\n      matchers: [\"call:example.com/pg.Promote\"]\n", "    []\n"),
+			wantErr: "absent from inputs.rules",
+		},
 	}
 
 	for _, tc := range cases {
@@ -544,10 +579,13 @@ buckets:
 }
 
 func TestBaselineWriteRoundTripsExactData(t *testing.T) {
-	baseline := BuildBaseline([]Finding{
+	findings := []Finding{
 		{Rule: "role.primary", Severity: SeverityForbidden, Symbol: "pkg.B"},
 		{Rule: "proc.promote", Severity: SeverityForbidden, Symbol: "pkg.A"},
-	}, "abc123", "2026-08-09 23:20:00 UTC")
+	}
+	res := result(findings)
+	rules := ruleSet("role.primary", "proc.promote")
+	baseline := BuildBaseline(rules, res, findings, 0, "abc123", "2026-08-09 23:20:00 UTC")
 	path := filepath.Join(t.TempDir(), "baseline.yaml")
 
 	if err := baseline.Write(path); err != nil {
@@ -653,7 +691,9 @@ func TestBaselineIOReportsSpecificErrors(t *testing.T) {
 	})
 
 	t.Run("missing output directory", func(t *testing.T) {
-		baseline := BuildBaseline(nil, "abc123", "2026-08-09 23:20:00 UTC")
+		res := result(nil)
+		rules := ruleSetForFindings(res)
+		baseline := BuildBaseline(rules, res, nil, 0, "abc123", "2026-08-09 23:20:00 UTC")
 		err := baseline.Write(filepath.Join(t.TempDir(), "missing", "baseline.yaml"))
 		if err == nil || !strings.Contains(err.Error(), "writing baseline") {
 			t.Fatalf("error = %v, want a baseline write error", err)
@@ -682,7 +722,7 @@ func TestCompareBaselinesFailsOnlyWhenTheBaselineGrows(t *testing.T) {
 		},
 		{
 			name:     "total grew",
-			head:     &Baseline{Schema: baselineSchema, Total: 301, TotalsByRule: map[string]int{"proc.promote": 3}},
+			head:     &Baseline{Schema: baselineSchema, Total: 301, TotalsByRule: map[string]int{"proc.promote": 4}},
 			wantGrew: true,
 			wantLine: "300 -> 301",
 		},
@@ -736,8 +776,284 @@ func TestCompareBaselinesRejectsARenamedBucket(t *testing.T) {
 	}
 }
 
+func TestCompareBaselinesRejectsARemovedRule(t *testing.T) {
+	base := &Baseline{
+		Schema: baselineSchema, Total: 113,
+		TotalsByRule: map[string]int{"proc.promote": 1, "proc.startstop": 112},
+		Inputs: Inputs{Rules: []RuleFingerprint{
+			{ID: "proc.promote", Severity: SeverityForbidden, Matchers: []string{"call:example.com/pg.Promote"}},
+			{ID: "proc.startstop", Severity: SeverityForbidden, Matchers: []string{"call:example.com/pg.Start"}},
+		}},
+	}
+	head := &Baseline{
+		Schema: baselineSchema, Total: 112,
+		TotalsByRule: map[string]int{"proc.startstop": 112},
+		Inputs: Inputs{Rules: []RuleFingerprint{
+			{ID: "proc.startstop", Severity: SeverityForbidden, Matchers: []string{"call:example.com/pg.Start"}},
+		}},
+	}
+
+	grew, lines := CompareBaselines(base, head)
+
+	if !grew {
+		t.Fatalf("removing the proc.promote rule passed the ratchet: %v", lines)
+	}
+	if !containsSubstring(lines, "rule proc.promote was removed from the rule set") {
+		t.Errorf("comparison does not name the removed rule: %v", lines)
+	}
+}
+
+func TestCompareBaselinesRejectsANarrowedMatcherSet(t *testing.T) {
+	base := &Baseline{
+		Schema: baselineSchema, Total: 2, TotalsByRule: map[string]int{"proc.promote": 2},
+		Inputs: Inputs{Rules: []RuleFingerprint{{
+			ID: "proc.promote", Severity: SeverityForbidden,
+			Matchers: []string{"call:example.com/pg.Promote", "literal:promote_trigger_file"},
+		}}},
+	}
+	head := &Baseline{
+		Schema: baselineSchema, Total: 1, TotalsByRule: map[string]int{"proc.promote": 1},
+		Inputs: Inputs{Rules: []RuleFingerprint{{
+			ID: "proc.promote", Severity: SeverityForbidden,
+			Matchers: []string{"call:example.com/pg.Promote"},
+		}}},
+	}
+
+	grew, lines := CompareBaselines(base, head)
+
+	if !grew {
+		t.Fatalf("narrowing proc.promote's matcher set passed the ratchet: %v", lines)
+	}
+	if !containsSubstring(lines, "rule proc.promote no longer matches literal:promote_trigger_file") {
+		t.Errorf("comparison does not name the removed matcher: %v", lines)
+	}
+}
+
+func TestCompareBaselinesRejectsANarrowedCallArgumentFilter(t *testing.T) {
+	base := &Baseline{
+		Schema: baselineSchema, Total: 4, TotalsByRule: map[string]int{"proc.startstop": 4},
+		Inputs: Inputs{Rules: []RuleFingerprint{{
+			ID: "proc.startstop", Severity: SeverityForbidden,
+			Matchers: []string{"call:example.com/pg.Start"},
+		}}},
+	}
+	head := &Baseline{
+		Schema: baselineSchema, Total: 0, TotalsByRule: map[string]int{},
+		Inputs: Inputs{Rules: []RuleFingerprint{{
+			ID: "proc.startstop", Severity: SeverityForbidden,
+			Matchers: []string{"call:example.com/pg.Start#arg=zzz-never"},
+		}}},
+	}
+
+	grew, lines := CompareBaselines(base, head)
+
+	if !grew {
+		t.Fatalf("narrowing proc.startstop to an argument that never matches passed the ratchet: %v", lines)
+	}
+	if !containsSubstring(lines, "no longer matches call:example.com/pg.Start") {
+		t.Errorf("comparison does not name the removed unfiltered call matcher: %v", lines)
+	}
+}
+
+func TestFingerprintIncludesCallArgumentFiltersInEveryCallMatcher(t *testing.T) {
+	res := &ScanResult{}
+	withoutFilter := &RuleSet{Rules: []Rule{{
+		ID: "proc.startstop", Severity: SeverityForbidden,
+		Calls: []string{"example.com/pg.Stop", "example.com/pg.Start"},
+	}}}
+	withFilter := &RuleSet{Rules: []Rule{{
+		ID: "proc.startstop", Severity: SeverityForbidden,
+		Calls:           []string{"example.com/pg.Stop", "example.com/pg.Start"},
+		CallArgContains: []string{"zzz-never", "postgres", "postgres"},
+	}}}
+
+	before := Fingerprint(withoutFilter, res).Rules[0].Matchers
+	after := Fingerprint(withFilter, res).Rules[0].Matchers
+
+	if strings.Join(before, "\n") == strings.Join(after, "\n") {
+		t.Fatalf("adding call_arg_contains did not change the call matcher identities: %v", after)
+	}
+	want := []string{
+		"call:example.com/pg.Start#arg=postgres,zzz-never",
+		"call:example.com/pg.Stop#arg=postgres,zzz-never",
+	}
+	if strings.Join(after, "\n") != strings.Join(want, "\n") {
+		t.Errorf("filtered call matchers = %v, want %v", after, want)
+	}
+}
+
+func TestCompareBaselinesRejectsScopeNarrowing(t *testing.T) {
+	baseScope := ScopeFingerprint{
+		Roots: []string{".", "extra"}, ExcludePaths: []string{"vendor/**"},
+		ExcludeGenerated: false, IncludeTests: true,
+	}
+	cases := []struct {
+		name      string
+		headScope ScopeFingerprint
+		want      string
+	}{
+		{
+			name: "exclude path added",
+			headScope: ScopeFingerprint{
+				Roots: []string{".", "extra"}, ExcludePaths: []string{"generated/**", "vendor/**"},
+				ExcludeGenerated: false, IncludeTests: true,
+			},
+			want: "exclude path generated/** was added",
+		},
+		{
+			name: "root removed",
+			headScope: ScopeFingerprint{
+				Roots: []string{"."}, ExcludePaths: []string{"vendor/**"},
+				ExcludeGenerated: false, IncludeTests: true,
+			},
+			want: "scan root extra was removed",
+		},
+		{
+			name: "generated files excluded",
+			headScope: ScopeFingerprint{
+				Roots: []string{".", "extra"}, ExcludePaths: []string{"vendor/**"},
+				ExcludeGenerated: true, IncludeTests: true,
+			},
+			want: "generated files are now excluded",
+		},
+		{
+			name: "test files excluded",
+			headScope: ScopeFingerprint{
+				Roots: []string{".", "extra"}, ExcludePaths: []string{"vendor/**"},
+				ExcludeGenerated: false, IncludeTests: false,
+			},
+			want: "test files are now excluded",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			base := &Baseline{Schema: baselineSchema, Inputs: Inputs{Scope: baseScope}}
+			head := &Baseline{Schema: baselineSchema, Inputs: Inputs{Scope: tc.headScope}}
+
+			grew, lines := CompareBaselines(base, head)
+
+			if !grew {
+				t.Fatalf("scope narrowing passed the ratchet: %v", lines)
+			}
+			if !containsSubstring(lines, tc.want) {
+				t.Errorf("comparison does not name %q: %v", tc.want, lines)
+			}
+		})
+	}
+}
+
+func TestCompareBaselinesRejectsMoreAllowListSuppression(t *testing.T) {
+	base := &Baseline{Schema: baselineSchema, AllowedTotal: 2}
+	head := &Baseline{Schema: baselineSchema, AllowedTotal: 5}
+
+	grew, lines := CompareBaselines(base, head)
+
+	if !grew {
+		t.Fatalf("increasing allow-list suppression passed the ratchet: %v", lines)
+	}
+	if !containsSubstring(lines,
+		"3 more findings are suppressed by the allow list; debt removed by exemption is not debt fixed") {
+		t.Errorf("comparison does not explain the increased suppression: %v", lines)
+	}
+}
+
+func TestCompareBaselinesAllowsGrowthAttributableToATightenedRule(t *testing.T) {
+	baseRules := []RuleFingerprint{
+		{ID: "proc.promote", Severity: SeverityForbidden, Matchers: []string{"call:example.com/pg.Promote"}},
+		{ID: "proc.startstop", Severity: SeverityForbidden, Matchers: []string{"call:example.com/pg.Start"}},
+	}
+	tightenedRules := []RuleFingerprint{
+		{
+			ID: "proc.promote", Severity: SeverityForbidden,
+			Matchers: []string{"call:example.com/pg.Promote", "literal:promote_trigger_file"},
+		},
+		{ID: "proc.startstop", Severity: SeverityForbidden, Matchers: []string{"call:example.com/pg.Start"}},
+	}
+	base := &Baseline{
+		Schema: baselineSchema, Total: 2,
+		TotalsByRule: map[string]int{"proc.promote": 1, "proc.startstop": 1},
+		Inputs:       Inputs{Rules: baseRules},
+		Buckets: []Bucket{
+			{Rule: "proc.promote", Symbol: "pkg.Promote", Count: 1},
+			{Rule: "proc.startstop", Symbol: "pkg.Start", Count: 1},
+		},
+	}
+	head := &Baseline{
+		Schema: baselineSchema, Total: 3,
+		TotalsByRule: map[string]int{"proc.promote": 2, "proc.startstop": 1},
+		Inputs:       Inputs{Rules: tightenedRules},
+		Buckets: []Bucket{
+			{Rule: "proc.promote", Symbol: "pkg.Promote", Count: 2},
+			{Rule: "proc.startstop", Symbol: "pkg.Start", Count: 1},
+		},
+	}
+
+	grew, lines := CompareBaselines(base, head)
+	if grew {
+		t.Fatalf("growth caused by the tightened proc.promote rule failed the ratchet: %v", lines)
+	}
+	if !containsSubstring(lines, "attributable growth: proc.promote 1 -> 2") {
+		t.Errorf("comparison does not mark the growth as attributable: %v", lines)
+	}
+	if !containsSubstring(lines, "rules diff") {
+		t.Errorf("attribution does not tell the reviewer to read the rules diff: %v", lines)
+	}
+
+	unrelatedGrowth := &Baseline{
+		Schema: baselineSchema, Total: 3,
+		TotalsByRule: map[string]int{"proc.promote": 1, "proc.startstop": 2},
+		Inputs:       Inputs{Rules: tightenedRules},
+		Buckets: []Bucket{
+			{Rule: "proc.promote", Symbol: "pkg.Promote", Count: 1},
+			{Rule: "proc.startstop", Symbol: "pkg.Start", Count: 2},
+		},
+	}
+	grew, lines = CompareBaselines(base, unrelatedGrowth)
+	if !grew {
+		t.Fatalf("growth in an untightened rule passed through another rule's attribution: %v", lines)
+	}
+}
+
+func TestCheckRejectsABaselineGeneratedUnderDifferentRules(t *testing.T) {
+	const symbol = "example.com/controller.handlePromotion"
+	res := result([]Finding{{
+		Rule: "role.current-primary-read", Severity: SeverityObserve, Symbol: symbol,
+	}}, symbol)
+	liveRules := &RuleSet{
+		Scope: Scope{Roots: []string{"."}},
+		Rules: []Rule{{
+			ID: "role.current-primary-read", Severity: SeverityObserve, Literals: []string{"currentPrimary"},
+		}},
+	}
+	inputs := Fingerprint(liveRules, res)
+	inputs.Rules = append(inputs.Rules, RuleFingerprint{
+		ID: "proc.promote", Severity: SeverityForbidden,
+		Matchers: []string{"call:example.com/pg.Promote"},
+	})
+	baseline := &Baseline{
+		Schema: baselineSchema, Total: 1, TotalsByRule: map[string]int{"proc.promote": 1}, Inputs: inputs,
+		Buckets: []Bucket{{Rule: "proc.promote", Symbol: symbol, Count: 1}},
+	}
+	cls := &Classification{Schema: classificationSchema, Entries: []Entry{{Symbol: symbol}}}
+
+	report := Check(liveRules, res, cls, baseline, "M0")
+
+	if !containsSubstring(report.Violations, "different rule set or scope") {
+		t.Fatalf("a baseline generated under a different rule set produced no violation: %v", report.Violations)
+	}
+	if !containsSubstring(report.Violations, "proc.promote") ||
+		!containsSubstring(report.Violations, "recorded baseline") {
+		t.Errorf("coherence violation does not make clear which side lacks proc.promote: %v", report.Violations)
+	}
+	if !containsSubstring(report.Hygiene, "stale classification: "+symbol) {
+		t.Errorf("classification made stale by the removed rule was not reported: %v", report.Hygiene)
+	}
+}
+
 func TestCheckVerifiesGuardWiring(t *testing.T) {
-	res := scanResultFixture(t, "mod-hits", loadFixtureRules(t))
+	rules := loadFixtureRules(t)
+	res := scanResultFixture(t, "mod-hits", rules)
 
 	entry := func(symbol, guard string) Entry {
 		return Entry{
@@ -771,7 +1087,7 @@ func TestCheckVerifiesGuardWiring(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			cls := &Classification{Schema: classificationSchema, Entries: []Entry{entry(tc.symbol, "required")}}
-			report := Check(res, cls, emptyBaseline(), "M0")
+			report := Check(rules, res, cls, emptyBaseline(rules, res), "M0")
 
 			if tc.want == "" {
 				for _, message := range []string{"guard: required but", "op literal must equal"} {
@@ -789,6 +1105,8 @@ func TestCheckVerifiesGuardWiring(t *testing.T) {
 }
 
 func TestCheckReportsStaleClassificationsAsHygiene(t *testing.T) {
+	res := result(nil)
+	rules := ruleSetForFindings(res)
 	cls := &Classification{
 		Schema: classificationSchema,
 		Entries: []Entry{{
@@ -798,7 +1116,7 @@ func TestCheckReportsStaleClassificationsAsHygiene(t *testing.T) {
 		}},
 	}
 
-	report := Check(result(nil), cls, emptyBaseline(), "M0")
+	report := Check(rules, res, cls, emptyBaseline(rules, res), "M0")
 
 	if !containsSubstring(report.Hygiene, "stale classification") {
 		t.Errorf("a classification for a vanished symbol was not reported: %v", report.Hygiene)
@@ -809,6 +1127,8 @@ func TestCheckReportsStaleClassificationsAsHygiene(t *testing.T) {
 }
 
 func TestCheckReportsStaleResponsibilityAnchors(t *testing.T) {
+	res := result(nil)
+	rules := ruleSetForFindings(res)
 	cls := &Classification{
 		Schema: classificationSchema,
 		Responsibilities: []Responsibility{{
@@ -821,7 +1141,7 @@ func TestCheckReportsStaleResponsibilityAnchors(t *testing.T) {
 		}},
 	}
 
-	report := Check(result(nil), cls, emptyBaseline(), "M0")
+	report := Check(rules, res, cls, emptyBaseline(rules, res), "M0")
 
 	if !containsSubstring(report.Hygiene, "stale responsibility anchor") {
 		t.Errorf("a vanished anchor was not reported: %v", report.Hygiene)
@@ -838,8 +1158,40 @@ func result(findings []Finding, symbols ...string) *ScanResult {
 	return res
 }
 
-func emptyBaseline() *Baseline {
-	return &Baseline{Schema: baselineSchema, TotalsByRule: map[string]int{}}
+// baselineWithInputs stamps the fingerprint of the rule set and scan a test
+// baseline is meant to have been generated from, so the coherence check sees a
+// matching pair and the test stays about what it was about.
+func baselineWithInputs(b *Baseline, rules *RuleSet, res *ScanResult) *Baseline {
+	copy := *b
+	copy.Inputs = Fingerprint(rules, res)
+	return &copy
+}
+
+func emptyBaseline(rules *RuleSet, res *ScanResult) *Baseline {
+	return baselineWithInputs(&Baseline{Schema: baselineSchema, TotalsByRule: map[string]int{}}, rules, res)
+}
+
+func ruleSet(ids ...string) *RuleSet {
+	rules := make([]Rule, 0, len(ids))
+	for _, id := range ids {
+		rules = append(rules, Rule{ID: id, Severity: SeverityForbidden, Literals: []string{"test:" + id}})
+	}
+	return &RuleSet{Scope: Scope{Roots: []string{"."}}, Rules: rules}
+}
+
+func ruleSetForFindings(res *ScanResult) *RuleSet {
+	seen := map[string]bool{}
+	rules := &RuleSet{Scope: Scope{Roots: []string{"."}}}
+	for _, finding := range res.Findings {
+		if seen[finding.Rule] {
+			continue
+		}
+		seen[finding.Rule] = true
+		rules.Rules = append(rules.Rules, Rule{
+			ID: finding.Rule, Severity: finding.Severity, Literals: []string{"test:" + finding.Rule},
+		})
+	}
+	return rules
 }
 
 func containsSubstring(lines []string, want string) bool {

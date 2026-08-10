@@ -89,10 +89,23 @@ var generatedLine = regexp.MustCompile(`^// Code generated .* DO NOT EDIT\.$`)
 // findings.
 func ScanRepo(repoRoot string, rs *RuleSet) (*ScanResult, error) {
 	merged := &ScanResult{Symbols: map[string]bool{}, GuardOps: map[string][]string{}}
+	repoAbs, err := filepath.Abs(repoRoot)
+	if err != nil {
+		return nil, fmt.Errorf("resolving repository root %s: %w", repoRoot, err)
+	}
+	repoAbs = filepath.Clean(repoAbs)
 
 	for _, root := range rs.Scope.Roots {
+		rootAbs, err := filepath.Abs(filepath.Join(repoAbs, filepath.FromSlash(root)))
+		if err != nil {
+			return nil, fmt.Errorf("resolving scan root %q: %w", root, err)
+		}
+		if rootAbs != repoAbs && !strings.HasPrefix(rootAbs, repoAbs+string(filepath.Separator)) {
+			return nil, fmt.Errorf("scan root %q leaves the repository: %s is outside %s", root, rootAbs, repoAbs)
+		}
+
 		prefix := path.Clean(filepath.ToSlash(root))
-		res, err := Scan(filepath.Join(repoRoot, filepath.FromSlash(root)), rs)
+		res, err := Scan(rootAbs, rs)
 		if err != nil {
 			return nil, err
 		}

@@ -315,6 +315,20 @@ func TestScanRepoReportsAMissingRootAsAToolError(t *testing.T) {
 	}
 }
 
+func TestScanRepoRejectsARootOutsideTheRepository(t *testing.T) {
+	rules := loadFixtureRules(t)
+	rules.Scope.Roots = []string{"../../elsewhere"}
+
+	_, err := ScanRepo("testdata", rules)
+	if err == nil {
+		t.Fatal("ScanRepo accepted a root that leaves the repository")
+	}
+	if !strings.Contains(err.Error(), "../../elsewhere") ||
+		!strings.Contains(err.Error(), "leaves the repository") {
+		t.Errorf("error %q does not name the root and say it leaves the repository", err)
+	}
+}
+
 func TestScanReportsUncompilableCodeAsAToolError(t *testing.T) {
 	moduleDir := t.TempDir()
 	for _, fixture := range []struct {
@@ -401,6 +415,11 @@ func TestLoadRulesRejectsInvalidConfiguration(t *testing.T) {
 			name:    "unknown schema",
 			yaml:    "schema: cnpatroni-authority-rules/v99\nrules: []\n",
 			wantErr: "schema",
+		},
+		{
+			name:    "empty rule set",
+			yaml:    "schema: cnpatroni-authority-rules/v1\nrules: []\n",
+			wantErr: "declares no rules",
 		},
 		{
 			name:    "unknown severity",

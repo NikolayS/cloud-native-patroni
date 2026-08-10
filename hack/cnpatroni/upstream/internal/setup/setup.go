@@ -33,7 +33,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
 	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
@@ -261,6 +263,10 @@ func (r *runner) configureMergeDriver() error {
 	// The git directory, not the worktree: an executable under bin/ would show
 	// up as an untracked file in every merge this guard is supposed to police.
 	destination := filepath.Join(commonDir, "cnpatroni", driverBinaryName)
+	quotedDestination, err := shellQuote(destination)
+	if err != nil {
+		return err
+	}
 	if err := r.installDriver(source, destination); err != nil {
 		return err
 	}
@@ -269,7 +275,7 @@ func (r *runner) configureMergeDriver() error {
 		key, value string
 	}{
 		{"merge." + boundary.MergeDriverName + ".name", driverDescription},
-		{"merge." + boundary.MergeDriverName + ".driver", destination + " merge-driver %O %A %B %L %P"},
+		{"merge." + boundary.MergeDriverName + ".driver", quotedDestination + " merge-driver '%O' '%A' '%B' '%L' '%P'"},
 	}
 
 	for _, s := range settings {
@@ -286,6 +292,16 @@ func (r *runner) configureMergeDriver() error {
 	}
 
 	return nil
+}
+
+func shellQuote(value string) (string, error) {
+	if strings.ContainsRune(value, '\'') || strings.IndexFunc(value, unicode.IsControl) >= 0 {
+		return "", fmt.Errorf(
+			"cannot register the boundary merge driver at %s: the path contains a character that cannot be quoted for the shell git runs the driver with; move the clone to a path without quotes or control characters",
+			strconv.Quote(value))
+	}
+
+	return "'" + value + "'", nil
 }
 
 // driverSource resolves the executable to register, and refuses a path that is

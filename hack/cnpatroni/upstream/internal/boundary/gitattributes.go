@@ -45,9 +45,10 @@ const gitAttributesHeader = `# Generated from hack/cnpatroni/upstream/boundary.y
 #   root=$(git rev-parse --show-toplevel)
 #   go build -C hack/cnpatroni/upstream \
 #     -o "$root/bin/cnpatroni-upstream" ./cmd/cnpatroni-upstream
+#   A $root containing a single quote is not supported; move the clone.
 #   git config merge.` + MergeDriverName + `.name "CloudNativePatroni boundary guard"
 #   git config merge.` + MergeDriverName + `.driver \
-#     "$root/bin/cnpatroni-upstream merge-driver %O %A %B %L %P"
+#     "'$root/bin/cnpatroni-upstream' merge-driver '%O' '%A' '%B' '%L' '%P'"
 #
 # The driver command must be an absolute path and must not change directory:
 # git substitutes %O %A %B with temporary file names that are relative to the

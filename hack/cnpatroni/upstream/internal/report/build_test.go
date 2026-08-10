@@ -137,7 +137,13 @@ func (s *scenario) upstreamCommit(subject string, files map[string]string) {
 func (s *scenario) build(t *testing.T) *report.Report {
 	t.Helper()
 
-	m, err := boundary.Parse([]byte(reportManifest))
+	return s.buildWithManifest(t, reportManifest)
+}
+
+func (s *scenario) buildWithManifest(t *testing.T, body string) *report.Report {
+	t.Helper()
+
+	m, err := boundary.Parse([]byte(body))
 	if err != nil {
 		t.Fatalf("boundary.Parse: %v", err)
 	}
@@ -313,6 +319,23 @@ func TestReportFlagsNewUndeclaredHAVocabulary(t *testing.T) {
 	if len(r.AuthoritySurfaceDelta.Undeclared) != 1 ||
 		r.AuthoritySurfaceDelta.Undeclared[0] != "internal/controller/newthing.go" {
 		t.Errorf("undeclared = %v", r.AuthoritySurfaceDelta.Undeclared)
+	}
+}
+
+func TestReportFlagsUndeclaredHAVocabularyWhenAnIncludePatternIsBroken(t *testing.T) {
+	s := newScenario(t)
+	s.upstreamCommit("feat: add an undeclared decision point", map[string]string{
+		"internal/controller/newthing.go": "package controller\n\n// sets TargetPrimary\n",
+	})
+	manifest := strings.Replace(reportManifest,
+		`include: ["**/*.go"]`, `include: ["**/*.go["]`, 1)
+
+	r := s.buildWithManifest(t, manifest)
+
+	if len(r.AuthoritySurfaceDelta.Undeclared) != 1 ||
+		r.AuthoritySurfaceDelta.Undeclared[0] != "internal/controller/newthing.go" {
+		t.Errorf("AuthoritySurfaceDelta.Undeclared = %v, want the undeclared HA file",
+			r.AuthoritySurfaceDelta.Undeclared)
 	}
 }
 
