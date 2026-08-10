@@ -565,6 +565,76 @@ func TestValidateReportsUndeclaredForkEdits(t *testing.T) {
 	}
 }
 
+// A file written by this fork has no upstream source to adapt. Naming it in an
+// adapted rule must not hide it from the fork-owned hygiene checks.
+func TestValidateReportsNewForkFilesDeclaredAdapted(t *testing.T) {
+	vf := newValidateFixture(t)
+	vf.git.Write("internal/cnpatroni/new.go", "package cnpatroni\n")
+	vf.git.Commit("add fork-owned code")
+
+	body := manifestBody(true, `  - id: adapt.new
+    ownership: adapted
+    paths: ["internal/cnpatroni/new.go"]
+`+validRules, "")
+
+	findings := vf.validate(t, body, boundary.Options{CheckDrift: true})
+	for _, f := range findings {
+		if f.Code != "D3" {
+			continue
+		}
+		if f.Path != "internal/cnpatroni/new.go" {
+			t.Errorf("D3 names %q, want internal/cnpatroni/new.go", f.Path)
+		}
+		if f.RuleID != "adapt.new" {
+			t.Errorf("D3 rule id = %q, want adapt.new", f.RuleID)
+		}
+		if f.Severity != boundary.SeverityUndeclared {
+			t.Errorf("D3 severity = %v, want undeclared", f.Severity)
+		}
+		if !strings.Contains(f.Message, "did not exist at the fork base") {
+			t.Errorf("D3 message %q should explain why the adapted claim is false", f.Message)
+		}
+
+		return
+	}
+	t.Fatalf("findings = %v, want D3 naming internal/cnpatroni/new.go", findings)
+}
+
+func TestValidateResolvesAdaptedGlobsToNewForkFiles(t *testing.T) {
+	vf := newValidateFixture(t)
+	vf.git.Write("internal/cnpatroni/new.go", "package cnpatroni\n")
+	vf.git.Commit("add fork-owned code")
+
+	body := manifestBody(true, `  - id: adapt.new-tree
+    ownership: adapted
+    paths: ["internal/cnpatroni/**"]
+`+validRules, "")
+
+	findings := vf.validate(t, body, boundary.Options{CheckDrift: true})
+	for _, f := range findings {
+		if f.Code == "D3" && f.RuleID == "adapt.new-tree" && f.Path == "internal/cnpatroni/new.go" {
+			return
+		}
+	}
+	t.Fatalf("findings = %v, want D3 for the concrete path matched by the adapted glob", findings)
+}
+
+func TestValidateAcceptsNewForkFilesDeclaredOwned(t *testing.T) {
+	vf := newValidateFixture(t)
+	vf.git.Write("internal/cnpatroni/new.go", "package cnpatroni\n")
+	vf.git.Commit("add fork-owned code")
+
+	body := manifestBody(true, `  - id: own.new
+    ownership: cnpatroni-owned
+    paths: ["internal/cnpatroni/**"]
+`+validRules, "")
+
+	findings := vf.validate(t, body, boundary.Options{CheckDrift: true})
+	if hasCode(findings, "D3") {
+		t.Fatalf("a new cnpatroni-owned path must not raise D3: %v", findings)
+	}
+}
+
 // upstream-untouched is proved, not asserted: the gate accepts a path whose
 // bytes were already in the fork base tree, wherever they sat in it. Parking a
 // verbatim copy at a new path is the case this fork actually has.
@@ -703,11 +773,32 @@ func TestRemediationNamesMisdeclaredPaths(t *testing.T) {
 	remedy := boundary.RemediationFor("boundary.yaml", []boundary.Finding{
 		{Code: "D1", Path: "pkg/new.go"},
 		{Code: "D2", RuleID: "keep.specs", Path: "pkg/specs/pods.go"},
+		{Code: "D3", RuleID: "adapt.new", Path: "internal/cnpatroni/new.go"},
 	})
-	for _, want := range []string{"pkg/new.go", "pkg/specs/pods.go", "reclassify"} {
+	for _, want := range []string{
+		"pkg/new.go",
+		"pkg/specs/pods.go",
+		"internal/cnpatroni/new.go",
+		"reclassify",
+		"cnpatroni-owned",
+	} {
 		if !strings.Contains(remedy, want) {
 			t.Errorf("remedy %q does not mention %q", remedy, want)
 		}
+	}
+}
+
+func TestRemediationReclassifiesFalseAdaptations(t *testing.T) {
+	remedy := boundary.RemediationFor("boundary.yaml", []boundary.Finding{
+		{Code: "D3", RuleID: "adapt.new", Path: "internal/cnpatroni/new.go"},
+	})
+	for _, want := range []string{"internal/cnpatroni/new.go", "adapt.new", "Reclassify", "cnpatroni-owned"} {
+		if !strings.Contains(remedy, want) {
+			t.Errorf("remedy %q does not mention %q", remedy, want)
+		}
+	}
+	if strings.Contains(remedy, "Declare each") {
+		t.Errorf("remedy %q tells the reader to declare a path that is already declared", remedy)
 	}
 }
 

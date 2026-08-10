@@ -560,9 +560,9 @@ func validateBaseline(opts Options) []Finding {
 
 // checkDrift reports paths this fork has changed since the fork base whose
 // declaration does not account for the change: paths no rule classifies (D1),
-// and paths whose declared ownership class promises no change at all (D2). It
-// is the half of the gate that watches our own pull requests rather than
-// upstream's.
+// paths whose declared ownership class promises no change at all (D2), and
+// paths declared adapted that did not exist at the fork base (D3). It is the
+// half of the gate that watches our own pull requests rather than upstream's.
 //
 // Matching a specific rule is not on its own an explanation. An
 // upstream-untouched rule states that the file is upstream's verbatim, so
@@ -589,6 +589,21 @@ func checkDrift(m *Manifest, opts Options) ([]Finding, error) {
 				// path, which is a manifest edit, not a code revert.
 				Severity: SeverityUndeclared,
 			})
+		case rule.Ownership == OwnershipAdapted:
+			existed, existsErr := opts.Repo.PathExistsAt(opts.Baseline.ForkBase.Commit, change.Path)
+			if existsErr != nil {
+				return nil, existsErr
+			}
+			if !existed {
+				findings = append(findings, Finding{
+					Code:   "D3",
+					RuleID: rule.ID,
+					Path:   change.Path,
+					Message: "declared adapted but did not exist at the fork base; " +
+						"reclassify it as cnpatroni-owned",
+					Severity: SeverityUndeclared,
+				})
+			}
 		case ownershipExplainsChange(rule, change.Path, opts.Repo.Root):
 		case rule.Ownership == OwnershipUpstreamUntouched:
 			// Deferred: the content check needs one pass over two trees, so it
@@ -625,7 +640,8 @@ func checkDrift(m *Manifest, opts Options) ([]Finding, error) {
 		}
 	}
 
-	// D1 before D2, each group by path, so that one run reads the same way twice.
+	// D1 before D2 before D3, each group by path, so one run reads the same way
+	// three times.
 	sort.SliceStable(findings, func(i, j int) bool {
 		if findings[i].Code != findings[j].Code {
 			return findings[i].Code < findings[j].Code
@@ -733,13 +749,15 @@ func misdeclaredMessage(rule *Rule) string {
 // RemediationFor renders the copy-pasteable remedy printed after drift
 // findings.
 func RemediationFor(manifestPath string, findings []Finding) string {
-	var undeclared, misdeclared []string
+	var undeclared, misdeclared, falselyAdapted []string
 	for _, f := range findings {
 		switch f.Code {
 		case "D1":
 			undeclared = append(undeclared, "  "+f.Path)
 		case "D2":
 			misdeclared = append(misdeclared, fmt.Sprintf("  %s (rule %s)", f.Path, f.RuleID))
+		case "D3":
+			falselyAdapted = append(falselyAdapted, fmt.Sprintf("  %s (rule %s)", f.Path, f.RuleID))
 		}
 	}
 
@@ -764,6 +782,16 @@ func RemediationFor(manifestPath string, findings []Finding) string {
 				"Restore the upstream content, or reclassify each path as adapted, disabled,\n"+
 				"cnpatroni-owned or deleted, %s",
 			len(misdeclared), manifestPath, strings.Join(misdeclared, "\n"), rerun)
+	}
+	if len(falselyAdapted) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b,
+			"%d file(s) new to this fork are declared adapted in %s:\n\n%s\n\n"+
+				"Adapted is only for inherited paths that existed at the fork base.\n"+
+				"Reclassify each path as cnpatroni-owned, or remove it if it was unintended, %s",
+			len(falselyAdapted), manifestPath, strings.Join(falselyAdapted, "\n"), rerun)
 	}
 
 	return b.String()

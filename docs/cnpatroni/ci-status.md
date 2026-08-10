@@ -92,9 +92,10 @@ this nested-module shape, so this is a live gap. The declared-coverage count als
 `_test.go` files; duplication excludes them, and dead-code reads tests only for the unit analysed
 with `-test`. A fork-authored tree inside the inherited root operator module, at a path no
 `cnpatroni-owned` rule enumerates, is matched by the manifest's trailing `**` catch-all and reads as
-upstream code, so neither ownership signal covers it. Closing it is the manifest owner's call —
-either a manifest rule naming the tree or a gate assertion that no tracked Go file may be
-classified by the literal `**` pattern. This gate does not widen the manifest.
+upstream code, so neither ownership signal covers it. Boundary drift validation rejects that
+landing as D1. Declaring the new path `adapted` does not evade the gate: D3 resolves the rule to
+each concrete changed path and proves that the path existed at the recorded fork base. A new path
+must instead be classified `cnpatroni-owned` for the hygiene coverage cross-check to accept it.
 
 There is no dead-code or duplication baseline file or allowlist. When the gate fires, use the paths
 and line numbers in its output to remove unreachable code or extract the duplicated behaviour into
