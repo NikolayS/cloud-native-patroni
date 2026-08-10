@@ -41,7 +41,23 @@ endif
 
 COMMIT := $(shell git rev-parse --short HEAD || echo unknown)
 DATE := $(shell git log -1 --pretty=format:'%ad' --date short)
-VERSION := $(shell git describe --tags --match 'v*' | sed -e 's/^v//; s/-g[0-9a-f]\+$$//; s/-\([0-9]\+\)$$/-dev\1/')
+# CloudNativePatroni: the inherited line was
+#   VERSION := $(shell git describe --tags --match 'v*' | sed ...)
+# which assumes the repository carries upstream CloudNativePG release tags. This
+# fork has none: it fetches `v*` tags from upstream but never pushes them, and it
+# has not started tagging itself. `git describe` then exits 128 and VERSION is
+# empty, which empties the ldflags, the OLM bundle version and the container
+# build metadata. CNPATRONI_VERSION is the declared fork version and is used
+# whenever a fork tag cannot be described, so VERSION is never empty. Once
+# CloudNativePatroni starts tagging, a `cnpatroni-v*` tag is described exactly as
+# upstream describes `v*`, keeping the inherited `1.4.0-dev24` shape.
+# CNPATRONI_GIT_VERSION doubles as the "a fork tag exists" flag: `docker-build`
+# passes `--snapshot` to GoReleaser without one, because GoReleaser refuses to
+# build a repository with no tags. That switch used to key off an empty VERSION,
+# which is no longer a usable proxy now that VERSION always has a value.
+CNPATRONI_VERSION ?= 0.1.0-dev.0
+CNPATRONI_GIT_VERSION := $(shell git describe --tags --match 'cnpatroni-v*' 2>/dev/null | sed -e 's/^cnpatroni-v//; s/-g[0-9a-f]\+$$//; s/-\([0-9]\+\)$$/-dev\1/')
+VERSION := $(or $(CNPATRONI_GIT_VERSION),$(CNPATRONI_VERSION))
 LDFLAGS= "-X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildVersion=${VERSION} $\
 -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildCommit=${COMMIT} $\
 -X github.com/cloudnative-pg/cloudnative-pg/pkg/versions.buildDate=${DATE}"
@@ -193,7 +209,7 @@ run: generate fmt vet manifests ## Run against the configured Kubernetes cluster
 
 docker-build: go-releaser ## Build the docker image.
 	GOOS=linux GOARCH=${ARCH} GOPATH=$(go env GOPATH) DATE=${DATE} COMMIT=${COMMIT} VERSION=${VERSION} \
-	  $(GO_RELEASER) build --skip=validate --clean --single-target $(if $(VERSION),,--snapshot); \
+	  $(GO_RELEASER) build --skip=validate --clean --single-target $(if $(CNPATRONI_GIT_VERSION),,--snapshot); \
 	builder_name_option=""; \
 	if [ -n "${BUILDER_NAME}" ]; then \
 	  builder_name_option="--builder ${BUILDER_NAME}"; \
