@@ -72,6 +72,34 @@ jobs:
         run: |
           set -euo pipefail
           base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+
+          # The pull request that introduces this audit has no merge-base
+          # baseline to compare. Bootstrap only from the recorded fork base and
+          # only with the exact inaugural baseline blob. This keeps the ratchet
+          # fail-closed for a changed bootstrap baseline and for every later
+          # pull request.
+          if ! git cat-file -e \
+            "${base}:hack/cnpatroni/audit/policy/authority-baseline.yaml" 2>/dev/null
+          then
+            bootstrap_base="b22682115c5f3ad1bfe69bed719151d0db918e39"
+            bootstrap_baseline_blob="d195581032a851eab6119da62b41dd903bd585f4"
+            current_baseline_blob="$(
+              git hash-object hack/cnpatroni/audit/policy/authority-baseline.yaml
+            )"
+
+            if [[ "${base}" != "${bootstrap_base}" ]]; then
+              echo "The merge base has no authority baseline and is not the bootstrap base." >&2
+              exit 1
+            fi
+            if [[ "${current_baseline_blob}" != "${bootstrap_baseline_blob}" ]]; then
+              echo "The inaugural authority baseline changed during bootstrap." >&2
+              exit 1
+            fi
+
+            echo "Verified the inaugural authority baseline; no merge-base baseline exists yet."
+            exit 0
+          fi
+
           git show "${base}:hack/cnpatroni/audit/policy/authority-baseline.yaml" \
             > "${RUNNER_TEMP}/baseline-base.yaml"
           go -C hack/cnpatroni/audit run . baseline \
