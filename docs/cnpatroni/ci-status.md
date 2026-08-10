@@ -17,6 +17,21 @@ high-availability authority, or that any cluster behaves correctly. It is eviden
 code compiles, the unit tests pass, the generated artefacts match their sources, the documentation
 builds, and the fork's boundary, authority, and code-hygiene gates are satisfied.
 
+The two fork-owned gate workflows now run on every push to every branch. Previously, a push to a
+branch outside their filters was unguarded unless an open pull request supplied a `pull_request`
+run. The jobs are cheap, and the fork's authority claim depends on them, so filtering branch names
+would make a cost saving into a correctness risk.
+
+The `divergence-report` job is different: it runs only on the weekly schedule and
+`workflow_dispatch`. Skipping it during ordinary development is correct for its purpose, but also
+means ordinary development never exercises it. Unless someone dispatches it manually, a break in
+the job surfaces on the weekly schedule or not at all.
+
+The authority-audit workflow sets `cancel-in-progress: true`, so a rapid second push to the same
+ref cancels the first run. The most recent run being green therefore does not establish that a
+given commit was verified; a green can belong to a superseded commit. The upstream-sync
+workflow cancels only `pull_request` runs, not push runs.
+
 The end-to-end suite would provision Kubernetes clusters and exercise a running operator and its
 managed clusters. That would provide behavioural evidence for the scenarios it covers. The suite
 lives in `continuous-delivery.yml` and never runs for a pull request. Its requested runs enter
@@ -84,8 +99,8 @@ Exactly eight workflow files remain active under `.github/workflows/`.
 | `continuous-integration.yml` | Runs on pull requests and is active and required. GoReleaser now uses `--snapshot` because the fork has no tags. Publication is gated by the `ENABLE_IMAGE_PUSH` repository variable. The gate is event-agnostic: while the variable is unset, it disables publication for pull requests, pushes to `main`, and the nightly schedule alike. The image build still builds the `distroless` and `ubi` targets for `linux/amd64` and `linux/arm64` on pull requests that change operator, test, shell-script, or Go code, per the `change-triage` gate; documentation-only pull requests skip `buildx` entirely. |
 | `codeql-analysis.yml` | Active and passing. It was briefly red for an unrelated reason: a deliberately malformed Go test fixture under `hack/cnpatroni/audit/testdata/` broke `make generate` during the CodeQL build step. Commit `20e49a0e` fixed the fixture, after which run `31346382287` concluded `success`. |
 | `spellcheck.yml` | Active and passing. It provides the `Run spellcheck` and `Run woke` checks. Its spellcheck sources cover `docs/src/` Markdown and `config/olm-manifests/bases/*.yaml`, so `docs/cnpatroni/` is not spellchecked; woke covers the wider tree according to its own configuration. |
-| `cnpatroni-authority-audit.yml` | Fork-owned, active, and passing. Its authority and code-hygiene jobs run on every pull request and push to `main`. |
-| `cnpatroni-upstream-sync.yml` | Fork-owned and contains two jobs. `boundary-guard` runs on every pull request and pushes to `main`, `cnpatroni/**`, and `spike/**`, and is passing. `divergence-report` runs only on the weekly schedule and `workflow_dispatch`, so its pull-request skip is correct. |
+| `cnpatroni-authority-audit.yml` | Fork-owned, active, and passing. Its authority and code-hygiene jobs run on every pull request and every push to any branch. |
+| `cnpatroni-upstream-sync.yml` | Fork-owned and contains three jobs. `boundary-guard` runs on every pull request and every push to any branch, and is passing. `divergence-report` runs only on the weekly schedule and `workflow_dispatch`, so its pull-request skip is correct. |
 | `continuous-delivery.yml` | Never runs on pull requests. Requested runs use `issue_comment` or `workflow_dispatch`; the inherited file also has a daily schedule. It provisions clusters and structurally needs cloud credentials, a Kubernetes cluster, and a published operator image, none of which exist here. It remains unmodified and dormant for this fork. |
 | `registry-clean.yml` | Runs on a daily schedule and through `workflow_dispatch`. It prunes the `cloudnative-pg-testing` package and, only when the repository owner is `cloudnative-pg`, the `pgbouncer-testing`, `postgresql-testing`, and `postgis-testing` operand packages. With `ENABLE_IMAGE_PUSH` unset, this fork publishes nothing, so there is nothing to prune. It remains in place and dormant in effect. |
 | `refresh-licenses.yml` | Runs weekly and through `workflow_dispatch`. It does not run on pull requests and remains in place. |

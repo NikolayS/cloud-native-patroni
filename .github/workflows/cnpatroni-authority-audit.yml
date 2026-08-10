@@ -14,9 +14,10 @@
 name: CNPatroni authority audit
 
 on:
+  # This fork's entire argument rests on these cheap gates catching regressions.
+  # A branch-pattern filter is a correctness risk disguised as a cost saving:
+  # any branch outside the pattern silently loses the gate.
   push:
-    branches:
-      - main
   pull_request:
   workflow_dispatch:
 
