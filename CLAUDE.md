@@ -1,8 +1,12 @@
 # CloudNativePatroni — working rules for agent sessions
 
-A fork of CloudNativePG 1.30.0 that replaces the inherited PostgreSQL
-high-availability and process-control layer with upstream Patroni. Read this
-file before changing anything.
+A fork of CloudNativePG that replaces the inherited PostgreSQL
+high-availability and process-control layer with upstream Patroni. The fork is
+derived from CloudNativePG at commit `b226821` (2026-08-06), which is
+post-1.30.0 development on upstream `main`; `pkg/versions/versions.go` still
+reports version `1.30.0` because upstream raises that constant at the next
+release. See rule 4 for the recorded deviation from specification section 20.1.
+Read this file before changing anything.
 
 Before proposing or making an architectural change, read the architecture spike
 specification and the owner directives. Both are maintained outside this
@@ -82,20 +86,33 @@ Never send `.claude/`, `.cursor/`, or `CLAUDE.md` in a patch aimed upstream.
 
 ## Rule 4 — branches and upstream
 
-Specification section 20.1:
+Specification section 20.1, verbatim:
 
 ```text
 upstream/main          CloudNativePG upstream
-upstream/release-*     Upstream release branches and tags
-origin/main            CloudNativePatroni main
+upstream/release-*     Upstream release branches/tags
+origin/main            CNPatroni main
 origin/spike/patroni   Architecture spike integration branch
 ```
 
-The fork base is the `v1.30.0` tag, never a moving upstream commit. Upstream
-changes are merged through the integration branch, reviewed, then merged into
-main; preserve upstream commits and copyright notices. Re-run the authority
-audit and the safety suite after any upstream integration touching operator
-reconciliation, the instance manager, probes, Services, configuration,
+That block is quoted as written, including the specification's working name
+`CNPatroni`; the project name is CloudNativePatroni. The same section requires:
+"The first fork base is the `v1.30.0` tag. Do not begin from a moving upstream
+commit."
+
+**Recorded deviation.** This repository does not satisfy that requirement. Its
+base is commit `b226821` ("chore: update osps baseline version (#11298)",
+2026-08-06), a `main` commit carrying roughly five weeks of upstream development
+after the 1.30.0 release of 2026-06-29. There are no tags in this checkout. The
+deviation is open with the project owner; do not describe the base as the
+`v1.30.0` tag anywhere, and do not rebase the fork onto the tag without the
+owner's decision, because that would discard inherited upstream work already
+present here.
+
+Upstream changes are merged through the integration branch, reviewed, then
+merged into main; preserve upstream commits and copyright notices. Re-run the
+authority audit and the safety suite after any upstream integration touching
+operator reconciliation, the instance manager, probes, Services, configuration,
 bootstrap, or upgrades.
 
 ## Rule 5 — where things live
@@ -109,6 +126,11 @@ bootstrap, or upgrades.
   code, not modified at M0.
 - `LICENSE`, `docs/LICENSE`, `licenses/` — never edit these. `NOTICE` records
   the derivation and the attribution the licences require.
+- The documentation website is not built from this repository — there is no
+  site configuration in this tree — so the website footer that owner directive
+  D-1 requires cannot be satisfied here. It is an outstanding item for whoever
+  owns the site repository, and it is not silently closed by the README carrying
+  the same text.
 
 ## Rule 6 — commits
 
@@ -117,3 +139,11 @@ at 72 characters, scope encouraged: `feat(patroni):`, `fix(instance):`,
 `docs(adr):`, `ci(fork-sync):`. Breaking changes use `!` and a
 `BREAKING CHANGE:` footer. Sign off every commit. Do not `git commit --amend`
 and do not force push without explicit confirmation from the user.
+
+## Rule 7 — how this project describes itself
+
+Use this text verbatim wherever the project's relationship to CloudNativePG is
+stated to a reader:
+
+> CloudNativePatroni is an independent project derived from CloudNativePG. It is not affiliated
+> with or endorsed by CloudNativePG, CNCF, LF Projects, or the Patroni maintainers.

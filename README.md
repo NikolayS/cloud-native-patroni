@@ -220,14 +220,22 @@ write authority.
 ### CloudNativePG
 
 This repository is a fork of [CloudNativePG](https://github.com/cloudnative-pg/cloudnative-pg)
-at release 1.30.0. The inherited code is licensed under Apache-2.0, and the
-inherited documentation under CC BY 4.0. Both licences are preserved:
-[`LICENSE`](LICENSE) covers the repository, [`docs/LICENSE`](docs/LICENSE)
-covers `docs/`, and [`licenses/`](licenses/) carries third-party dependency
-licences. Copyright notices in inherited files are retained unchanged, as
-Apache-2.0 requires for derivative work. [`NOTICE`](NOTICE) records the
-derivation, the attribution CC BY 4.0 requires for adapted documentation, and
-the fact that files have been modified.
+taken at commit `b226821` (2026-08-06), which is post-1.30.0 development on the
+upstream `main` branch. The version constant in the inherited code still reads
+`1.30.0` because upstream raises it at the next release; the derivation point is
+the commit. Specification section 20.1 asks for the `v1.30.0` tag as the fork
+base, so this is a recorded deviation, described in [`CLAUDE.md`](CLAUDE.md)
+under rule 4 and open with the project owner.
+
+The inherited code is licensed under Apache-2.0, and the inherited documentation
+under CC BY 4.0. Both licences are preserved: [`LICENSE`](LICENSE) covers the
+repository, [`docs/LICENSE`](docs/LICENSE) covers `docs/`, and
+[`licenses/`](licenses/) carries third-party dependency licences. Copyright
+notices in inherited files are retained unchanged, as Apache-2.0 requires for
+derivative work. [`NOTICE`](NOTICE) records the derivation, the fact that files
+have been modified, and the attribution obligation that CC BY 4.0 places on any
+documentation page this project adapts. No page under `docs/` has been adapted
+yet, so no per-page credit line exists yet either.
 
 The merge policy is continuous upstream tracking rather than a single merge.
 Specification section 20 defines the repository model, the merge policy, and the
@@ -275,12 +283,17 @@ Patroni-based operators named above. This repository has nothing to install.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md), [`GOVERNANCE.md`](GOVERNANCE.md),
   [`MAINTAINERS.md`](MAINTAINERS.md), [`SECURITY.md`](SECURITY.md),
   [`SUPPORT.md`](SUPPORT.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md),
-  [`ROADMAP.md`](ROADMAP.md) — this project's own statements, not
-  CloudNativePG's.
+  [`ROADMAP.md`](ROADMAP.md), [`DEPENDENCIES.md`](DEPENDENCIES.md) — this
+  project's own statements, not CloudNativePG's.
 - `api/`, `internal/`, `pkg/`, `config/`, `tests/` — inherited CloudNativePG
   code, unchanged at M0.
-- [`contribute/`](contribute/README.md) — inherited developer documentation,
-  still largely accurate for build and test mechanics.
+- [`contribute/`](contribute/) — inherited developer documentation. The build
+  and test mechanics in
+  [`contribute/development_environment`](contribute/development_environment) and
+  [`contribute/e2e_testing_environment`](contribute/e2e_testing_environment) are
+  still accurate. The community, governance, roadmap, and chat-channel content
+  in [`contribute/README.md`](contribute/README.md) is CloudNativePG's and does
+  not apply to this fork; it has not been rewritten yet.
 
 ## Licence
 
