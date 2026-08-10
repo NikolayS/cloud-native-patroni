@@ -74,12 +74,24 @@ jobs:
       # The second layer of the ratchet. The per-bucket check above catches an
       # author who added a forbidden call. This catches the author who
       # regenerated the baseline to make that check green, because the
-      # regenerated file is compared against the one on the merge base.
+      # regenerated file is compared against the one the branch had before.
+      #
+      # This is the layer worth protecting, and it only protects what it runs
+      # on: mark this job a required status check on main, otherwise the whole
+      # audit is advisory.
       - name: Verify the authority baseline did not grow
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         run: |
-          set -euo pipefail
-          base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+          else
+            # A direct push to main bypasses the pull request, so there is no
+            # merge base. Compare against the commit this one replaced, which
+            # is the tip main carried before the push for a single commit and
+            # the first parent for a merge.
+            base="$(git rev-parse "HEAD^")"
+          fi
 
           # The pull request that introduces this audit has no merge-base
           # baseline to compare. Bootstrap only from the recorded fork base and
@@ -114,3 +126,27 @@ jobs:
             --compare "${RUNNER_TEMP}/baseline-base.yaml"
         env:
           BASE_REF: ${{ github.base_ref }}
+
+  # hack/cnpatroni/audit is its own Go module, so the govulncheck job in
+  # continuous-integration.yml — which scans the root module and tests/ — never
+  # sees golang.org/x/tools, golang.org/x/mod, golang.org/x/sync or
+  # go.yaml.in/yaml/v3. This module executes on every pull request, so it is
+  # scanned here rather than in the inherited file, which upstream edits often
+  # (specification section 20.2). The action pin is the one that file already
+  # uses. Exposure is CI-runner-local: nothing in this module ships in the
+  # operator image.
+  audit-vulncheck:
+    name: Run govulncheck on the audit module
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Run govulncheck (audit module)
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1
+        with:
+          go-version-file: hack/cnpatroni/audit/go.mod
+          # Override the default value of "stable" for go-version-input.
+          # Without this, setup-go receives both go-version=stable and
+          # go-version-file, and ignores the file.
+          # See https://github.com/golang/go/issues/70036
+          go-version-input: ""
+          check-latest: true
+          work-dir: hack/cnpatroni/audit
