@@ -5,11 +5,16 @@
   it.
 - Date: 2026-08-10 02:10:32 UTC
 - Sources: [`CLAUDE.md`](../../CLAUDE.md) rule 1 and preamble;
-  [`authority-audit.md`](../cnpatroni/authority-audit.md);
-  [`responsibility-map.md`](../cnpatroni/responsibility-map.md);
+  `authority-audit.md` (generated);
+  `responsibility-map.md` (generated);
   `hack/cnpatroni/audit/policy/authority-rules.yaml`;
   `internal/cnpatroni/guard/guard.go`;
   `hack/cnpatroni/upstream/boundary.yaml`
+
+The generated `authority-audit.md` and `responsibility-map.md` are not checked
+in. Produce them from the repository root with
+`go -C hack/cnpatroni/audit run . doc`; CI publishes both as the
+`cnpatroni-authority-audit` artifact.
 
 ## Context
 
@@ -112,7 +117,7 @@ takes the first element.
 |---|---|
 | Static authority audit and its gate | `hack/cnpatroni/audit`, see [0007](0007-static-authority-audit-enforces-rule-1.md) |
 | Rule set naming the forbidden operations | `hack/cnpatroni/audit/policy/authority-rules.yaml` |
-| Generated audit and responsibility map | [`authority-audit.md`](../cnpatroni/authority-audit.md), [`responsibility-map.md`](../cnpatroni/responsibility-map.md) |
+| Generated audit and responsibility map | `authority-audit.md` (generated), `responsibility-map.md` (generated) |
 | Fail-closed runtime guard | `internal/cnpatroni/guard`, see [0008](0008-fail-closed-runtime-lifecycle-guard.md) |
 | CI job | `.github/workflows/cnpatroni-authority-audit.yml` |
 | Upstream merge gate | `hack/cnpatroni/upstream/boundary.yaml`, see [0006](0006-boundary-manifest-gates-upstream-merges.md) |

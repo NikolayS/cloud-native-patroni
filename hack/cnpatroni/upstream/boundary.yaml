@@ -52,6 +52,11 @@ audit_terms:
   - '[Pp]romotionToken'
   - FencedInstances
   - switchover
+  - pg_promote
+  - 'recovery\.signal'
+  - restore_command
+  - recovery_target_timeline
+  - wal_log_hints
 
 # Sources that `make generate manifests apidoc` turns into checked-in output.
 # Upstream touching one of these forces a regeneration step after the merge.

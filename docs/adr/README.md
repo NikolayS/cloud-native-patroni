@@ -70,7 +70,7 @@ those numbers, for decisions that have not been made yet:
 - `ADR-002` decides what runs in the database container, and therefore whether
   the instance manager survives as a process. It is cited as a gate by
   [`naming-policy.md`](../cnpatroni/naming-policy.md),
-  [`authority-audit.md`](../cnpatroni/authority-audit.md),
+  `authority-audit.md` (generated),
   `hack/cnpatroni/audit/policy/authority-classification.yaml`,
   `hack/cnpatroni/upstream/boundary.yaml`, and
   `internal/cnpatroni/guard/guard.go`.
