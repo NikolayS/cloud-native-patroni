@@ -21,6 +21,11 @@
 #     an error to a warning. Flip it to `false` in the same change that accepts
 #     the M0 authority audit.
 #
+#   * `ownership_ratchet_allow` acknowledges one dropped literal path pattern
+#     from a `cnpatroni-owned` or `disabled` rule. Every entry requires the base
+#     rule id, the exact path pattern and a reason. It cannot acknowledge a
+#     class change or the removal of an entire rule.
+#
 # Ownership classes and their merge consequences are documented in
 # docs/cnpatroni/fork-maintenance.md.
 ---

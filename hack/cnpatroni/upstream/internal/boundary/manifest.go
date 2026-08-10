@@ -143,6 +143,13 @@ type Rule struct {
 	globs []*Glob
 }
 
+// RatchetAllowance records an acknowledged ownership path narrowing.
+type RatchetAllowance struct {
+	Rule   string `yaml:"rule"`
+	Path   string `yaml:"path"`
+	Reason string `yaml:"reason"`
+}
+
 // EffectiveState returns the declared state, defaulting to present.
 func (r *Rule) EffectiveState() State {
 	if r.State == "" {
@@ -163,16 +170,17 @@ func (r *Rule) Globs() []*Glob { return r.globs }
 
 // Manifest is a parsed boundary manifest.
 type Manifest struct {
-	Schema              string              `yaml:"schema"`
-	GeneratedFrom       string              `yaml:"generated_from"`
-	ClassificationState ClassificationState `yaml:"classification_state,omitempty"`
-	Provisional         bool                `yaml:"provisional"`
-	DefaultOwnership    string              `yaml:"default_ownership"`
-	AuditScan           Scan                `yaml:"audit_scan"`
-	AuditTerms          []string            `yaml:"audit_terms"`
-	GeneratedArtifacts  []string            `yaml:"generated_artifacts"`
-	RequiredPaths       []string            `yaml:"required_paths"`
-	Rules               []Rule              `yaml:"rules"`
+	Schema                string              `yaml:"schema"`
+	GeneratedFrom         string              `yaml:"generated_from"`
+	ClassificationState   ClassificationState `yaml:"classification_state,omitempty"`
+	Provisional           bool                `yaml:"provisional"`
+	DefaultOwnership      string              `yaml:"default_ownership"`
+	AuditScan             Scan                `yaml:"audit_scan"`
+	AuditTerms            []string            `yaml:"audit_terms"`
+	GeneratedArtifacts    []string            `yaml:"generated_artifacts"`
+	RequiredPaths         []string            `yaml:"required_paths"`
+	OwnershipRatchetAllow []RatchetAllowance  `yaml:"ownership_ratchet_allow,omitempty"`
+	Rules                 []Rule              `yaml:"rules"`
 
 	path   string
 	sha256 string
