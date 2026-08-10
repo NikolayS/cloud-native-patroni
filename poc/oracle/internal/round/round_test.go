@@ -26,14 +26,6 @@ import (
 	"github.com/cloudnative-pg/cloudnative-pg/poc/oracle/internal/model"
 )
 
-func TestDispatchInstantDoesNotAccumulateDrift(t *testing.T) {
-	start := model.Instant(1_000_000)
-	period := 500 * time.Millisecond
-	if got := DispatchInstant(start, 10, period); got != model.Instant(5_001_000_000) {
-		t.Fatalf("DispatchInstant() = %d, want 5001000000", got)
-	}
-}
-
 func TestNodeGateSerializesAttempts(t *testing.T) {
 	var gate NodeGate
 	if !gate.TryStart() {

@@ -504,38 +504,51 @@ func (r *nodeRuntime) lineageSnapshot() lineageToken {
 	return r.lineage
 }
 
+func dispatchAttempt(
+	ctx context.Context,
+	runtime *nodeRuntime,
+	roundID int64,
+	origin time.Time,
+	timeout time.Duration,
+	release <-chan struct{},
+	results chan<- model.Attempt,
+	wg *sync.WaitGroup,
+) {
+	if !runtime.gate.TryStart() {
+		now := time.Now()
+		instant := model.Instant(now.Sub(origin).Nanoseconds())
+		results <- model.Attempt{RoundID: roundID, NodeID: runtime.info.Name, DispatchAt: instant, SettleAt: instant, Outcome: model.NoAttempt, Error: "previous attempt is still in flight"}
+		return
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer runtime.gate.Done()
+		<-release
+		attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		runtime.mu.Lock()
+		conn := runtime.writeConn
+		runtime.mu.Unlock()
+		attempt := postgres.Writer{NodeID: runtime.info.Name, Exec: conn, Origin: origin, Now: time.Now}.Attempt(attemptCtx, roundID)
+		if attempt.Outcome == model.InDoubt && conn != nil {
+			runtime.mu.Lock()
+			if runtime.writeConn == conn {
+				runtime.writeConn = nil
+			}
+			runtime.mu.Unlock()
+			_ = conn.Close(context.Background())
+		}
+		results <- attempt
+	}()
+}
+
 func executeRound(ctx context.Context, runtimes []*nodeRuntime, roundID int64, origin time.Time, timeout time.Duration) RoundEvidence {
 	release := make(chan struct{})
 	results := make(chan model.Attempt, len(runtimes))
 	var wg sync.WaitGroup
 	for _, runtime := range runtimes {
-		if !runtime.gate.TryStart() {
-			now := time.Now()
-			instant := model.Instant(now.Sub(origin).Nanoseconds())
-			results <- model.Attempt{RoundID: roundID, NodeID: runtime.info.Name, DispatchAt: instant, SettleAt: instant, Outcome: model.NoAttempt, Error: "previous attempt is still in flight"}
-			continue
-		}
-		wg.Add(1)
-		go func(runtime *nodeRuntime) {
-			defer wg.Done()
-			defer runtime.gate.Done()
-			<-release
-			attemptCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			runtime.mu.Lock()
-			conn := runtime.writeConn
-			runtime.mu.Unlock()
-			attempt := postgres.Writer{NodeID: runtime.info.Name, Exec: conn, Origin: origin, Now: time.Now}.Attempt(attemptCtx, roundID)
-			if attempt.Outcome == model.InDoubt && conn != nil {
-				runtime.mu.Lock()
-				if runtime.writeConn == conn {
-					runtime.writeConn = nil
-				}
-				runtime.mu.Unlock()
-				_ = conn.Close(context.Background())
-			}
-			results <- attempt
-		}(runtime)
+		dispatchAttempt(ctx, runtime, roundID, origin, timeout, release, results, &wg)
 	}
 	close(release)
 	wg.Wait()
@@ -558,33 +571,7 @@ func fireRoundAsync(ctx context.Context, runtimes []*nodeRuntime, roundID int64,
 	var attempts sync.WaitGroup
 	for _, runtime := range runtimes {
 		lineages[runtime.info.Name] = runtime.lineageSnapshot()
-		if !runtime.gate.TryStart() {
-			now := time.Now()
-			instant := model.Instant(now.Sub(origin).Nanoseconds())
-			results <- model.Attempt{RoundID: roundID, NodeID: runtime.info.Name, DispatchAt: instant, SettleAt: instant, Outcome: model.NoAttempt, Error: "previous attempt is still in flight"}
-			continue
-		}
-		attempts.Add(1)
-		go func(runtime *nodeRuntime) {
-			defer attempts.Done()
-			defer runtime.gate.Done()
-			<-release
-			attemptCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			runtime.mu.Lock()
-			conn := runtime.writeConn
-			runtime.mu.Unlock()
-			attempt := postgres.Writer{NodeID: runtime.info.Name, Exec: conn, Origin: origin, Now: time.Now}.Attempt(attemptCtx, roundID)
-			if attempt.Outcome == model.InDoubt && conn != nil {
-				runtime.mu.Lock()
-				if runtime.writeConn == conn {
-					runtime.writeConn = nil
-				}
-				runtime.mu.Unlock()
-				_ = conn.Close(context.Background())
-			}
-			results <- attempt
-		}(runtime)
+		dispatchAttempt(ctx, runtime, roundID, origin, timeout, release, results, &attempts)
 	}
 	close(release)
 	coordinators.Add(1)
@@ -712,7 +699,7 @@ func runSampler(ctx context.Context, origin time.Time, config Config, kubeClient
 		}
 		pods, podsErr := kubeClient.Core().CoreV1().Pods(config.Namespace).List(ctx, metav1.ListOptions{})
 		if podsErr == nil {
-			evidence.setBundleError(writer.AppendJSONL("samples/k8s-pods.jsonl", map[string]any{"taken_at": taken.UTC(), "mono_ns": taken.Sub(origin).Nanoseconds(), "ok": true, "stale_candidate": marks.partitioned.Load(), "raw": pods}))
+			evidence.setBundleError(writer.AppendJSONL("samples/k8s-pods.jsonl", map[string]any{"taken_at": taken.UTC(), "mono_ns": taken.Sub(origin).Nanoseconds(), "ok": true, "stale_candidate": sample.StaleCandidate(marks.partitioned.Load(), taken), "raw": pods}))
 		}
 		events, eventsErr := kubeClient.Core().CoreV1().Events(config.Namespace).List(ctx, metav1.ListOptions{})
 		if eventsErr == nil {

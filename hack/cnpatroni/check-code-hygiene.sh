@@ -31,21 +31,29 @@ readonly -a SCAN_UNIT_MODULES=(
   "hack/cnpatroni/upstream"
   "hack/cnpatroni/audit"
   "."
+  "poc/oracle"
+  "poc/chaos"
 )
 readonly -a SCAN_UNIT_DIRECTORIES=(
   "hack/cnpatroni/upstream"
   "hack/cnpatroni/audit"
   "internal/cnpatroni"
+  "poc/oracle"
+  "poc/chaos"
 )
 readonly -a SCAN_UNIT_DEADCODE_ARGUMENTS=(
   "./cmd/..."
   "."
   $'-test\n-filter=^github\\.com/cloudnative-pg/cloudnative-pg/internal/cnpatroni(?:/.*)?$\n./internal/cnpatroni/...'
+  "./cmd/..."
+  "./cmd/..."
 )
 readonly -a SCAN_UNIT_NOTES=(
   "The command packages are the executable roots; internal/gittest is a test-only fixture."
   "The audit module currently has one command package at its module root."
   "The library test executable supplies the root; the filter keeps findings in scope."
+  "Every command package in the oracle module is an executable root."
+  "Every command package in the chaos module is an executable root."
 )
 
 # deadcode needs an executable root. internal/cnpatroni is a library, so its
@@ -65,14 +73,23 @@ readonly -a INHERITED_MODULE_NOTES=(
   "The upstream end-to-end suite."
 )
 
+# Every coverage exclusion must name a repository-relative file or directory
+# and give the corresponding written reason. There are no current exclusions.
+readonly -a COVERAGE_EXCLUSION_PATHS=()
+readonly -a COVERAGE_EXCLUSION_REASONS=()
+
 # Sixty tokens is the measured zero-clone threshold. It is high enough to avoid
 # flagging short, idiomatic Go sequences such as repeated error handling, but
 # low enough to catch a substantial copied block before it becomes entrenched.
 readonly DUPL_THRESHOLD=60
 
 hygiene_tmp=""
+boundary_helper_directory=""
 
 cleanup() {
+  if [[ -n "${boundary_helper_directory}" ]]; then
+    rm -rf -- "${boundary_helper_directory}"
+  fi
   if [[ -n "${hygiene_tmp}" ]]; then
     rm -rf -- "${hygiene_tmp}"
   fi
@@ -120,6 +137,22 @@ validate_configuration() {
     printf 'Code-hygiene inherited-module table is inconsistent.\n' >&2
     return 1
   fi
+
+  if [[ "${#COVERAGE_EXCLUSION_PATHS[@]}" -ne \
+    "${#COVERAGE_EXCLUSION_REASONS[@]}" ]]; then
+    printf 'Code-hygiene coverage-exclusion table is inconsistent.\n' >&2
+    return 1
+  fi
+
+  local index
+  for index in "${!COVERAGE_EXCLUSION_PATHS[@]}"; do
+    if [[ -z "${COVERAGE_EXCLUSION_PATHS[${index}]}" ]] ||
+      [[ -z "${COVERAGE_EXCLUSION_REASONS[${index}]}" ]]; then
+      printf 'Code-hygiene coverage exclusion %s needs a path and a written reason.\n' \
+        "${index}" >&2
+      return 1
+    fi
+  done
 }
 
 collect_scanned_files() {
@@ -141,6 +174,7 @@ collect_scanned_files() {
           -name '*.go' \
           ! -name '*_test.go' \
           ! -path '*/testdata/*' \
+          ! -path '*/vendor/*' \
           -print; then
           exit 1
         fi
@@ -273,7 +307,6 @@ collect_modules() {
 collect_candidate_files() {
   local repo_root="$1"
   local candidate_list="$2"
-  local candidate_nul="$3"
   local all_candidates="${hygiene_tmp}/all-candidate-go-files.nul"
   local file
 
@@ -288,36 +321,179 @@ collect_candidate_files() {
   fi
 
   : >"${candidate_list}"
-  : >"${candidate_nul}"
   while IFS= read -r -d '' file; do
-    if [[ "${file}" == *_test.go ]] || [[ "/${file}" == */testdata/* ]]; then
+    if [[ "/${file}" == */testdata/* ]] || [[ "/${file}" == */vendor/* ]]; then
       continue
     fi
     printf '%s\n' "${file}" >>"${candidate_list}"
-    printf '%s\0' "${file}" >>"${candidate_nul}"
   done <"${all_candidates}"
 
   LC_ALL=C sort -u -o "${candidate_list}" "${candidate_list}"
+}
+
+collect_owned_files() {
+  local repo_root="$1"
+  local candidate_list="$2"
+  local owned_files="$3"
+  local helper_error="${hygiene_tmp}/boundary-helper.stderr"
+  local helper_module="${repo_root}/hack/cnpatroni/upstream"
+  local helper_package
+
+  boundary_helper_directory="$(
+    mktemp -d "${helper_module}/cnpatroni-hygiene-coverage.XXXXXX"
+  )"
+  helper_package="./${boundary_helper_directory##*/}"
+
+  cat >"${boundary_helper_directory}/main.go" <<'EOF'
+/*
+Copyright © contributors to CloudNativePG, established as
+CloudNativePG a Series of LF Projects, LLC.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"os"
+
+	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
+)
+
+func main() {
+	if len(os.Args) != 3 {
+		fmt.Fprintln(os.Stderr, "usage: boundary-coverage MANIFEST CANDIDATES")
+		os.Exit(1)
+	}
+
+	manifest, err := boundary.Load(os.Args[1])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	findings, err := boundary.Validate(manifest, boundary.Options{})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if code := boundary.ExitCode(findings); code != 0 {
+		for _, finding := range findings {
+			fmt.Fprintln(os.Stderr, finding.String())
+		}
+		os.Exit(code)
+	}
+
+	candidates, err := os.Open(os.Args[2])
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	defer candidates.Close()
+
+	output := bufio.NewWriter(os.Stdout)
+	scanner := bufio.NewScanner(candidates)
+	for scanner.Scan() {
+		path := scanner.Text()
+		rule := manifest.Match(path)
+		if rule != nil && rule.Ownership == boundary.OwnershipCNPatroniOwned {
+			if _, err := fmt.Fprintln(output, path); err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := output.Flush(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+EOF
+
+  if ! (
+    cd "${helper_module}"
+    go run \
+      "${helper_package}" \
+      "${repo_root}/hack/cnpatroni/upstream/boundary.yaml" \
+      "${candidate_list}"
+  ) >"${owned_files}" 2>"${helper_error}"; then
+    printf 'Coverage cross-check could not read fork-owned paths from boundary.yaml:\n' >&2
+    cat "${helper_error}" >&2
+    rm -rf -- "${boundary_helper_directory}"
+    boundary_helper_directory=""
+    return 1
+  fi
+
+  rm -rf -- "${boundary_helper_directory}"
+  boundary_helper_directory=""
+  LC_ALL=C sort -u -o "${owned_files}" "${owned_files}"
+}
+
+file_is_in_scan_unit() {
+  local file="$1"
+  local directories
+  local directory
+
+  for directories in "${SCAN_UNIT_DIRECTORIES[@]}"; do
+    while IFS= read -r directory; do
+      directory="${directory%/}"
+      if [[ -n "${directory}" ]] &&
+        { [[ "${file}" == "${directory}" ]] || [[ "${file}" == "${directory}/"* ]]; }; then
+        return 0
+      fi
+    done <<<"${directories}"
+  done
+
+  return 1
+}
+
+file_is_explicitly_excluded() {
+  local file="$1"
+  local index
+  local exclusion
+
+  for index in "${!COVERAGE_EXCLUSION_PATHS[@]}"; do
+    exclusion="${COVERAGE_EXCLUSION_PATHS[${index}]%/}"
+    if [[ "${file}" == "${exclusion}" ]] || [[ "${file}" == "${exclusion}/"* ]]; then
+      return 0
+    fi
+  done
+
+  return 1
 }
 
 check_scan_coverage() {
   local repo_root="$1"
   local scanned_files="$2"
   local candidate_list="${hygiene_tmp}/candidate-go-files"
-  local candidate_nul="${hygiene_tmp}/candidate-go-files.nul"
-  local attribute_output="${hygiene_tmp}/candidate-attributes.nul"
   local owned_files="${hygiene_tmp}/owned-go-files"
+  local scanned_owned_files="${hygiene_tmp}/scanned-owned-go-files"
+  local inconsistent="${hygiene_tmp}/inconsistent-scanned-go-files"
   local module_list="${hygiene_tmp}/go-modules"
   local uncovered="${hygiene_tmp}/uncovered-go-files"
-  local uncovered_sorted="${hygiene_tmp}/uncovered-go-files.sorted"
   local checkout_state
   local file
-  local attribute
-  local value
   local module
-  local current_module=""
-  local uncovered_file
   local fork_owned_count=0
+  local boundary_owned_count=0
+  local excluded_count=0
 
   if ! checkout_state="$(git -C "${repo_root}" rev-parse --is-inside-work-tree 2>/dev/null)" ||
     [[ "${checkout_state}" != "true" ]]; then
@@ -326,68 +502,83 @@ check_scan_coverage() {
     return 1
   fi
 
-  if ! collect_candidate_files \
-    "${repo_root}" "${candidate_list}" "${candidate_nul}"; then
+  if ! collect_candidate_files "${repo_root}" "${candidate_list}"; then
     return 1
   fi
+  if ! collect_owned_files \
+    "${repo_root}" "${candidate_list}" "${owned_files}"; then
+    return 1
+  fi
+  boundary_owned_count="$(wc -l <"${owned_files}")"
+  boundary_owned_count="${boundary_owned_count//[[:space:]]/}"
+  if [[ "${boundary_owned_count}" -eq 0 ]]; then
+    printf '%s\n' \
+      'Coverage cross-check failed: the manifest classified no Go file as cnpatroni-owned.' \
+      'This is treated as a misconfiguration rather than a pass.' \
+      'Check hack/cnpatroni/upstream/boundary.yaml.' >&2
+    return 1
+  fi
+
+  if ! collect_owned_files \
+    "${repo_root}" "${scanned_files}" "${scanned_owned_files}"; then
+    return 1
+  fi
+  comm -23 "${scanned_files}" "${scanned_owned_files}" >"${inconsistent}"
+  if [[ -s "${inconsistent}" ]]; then
+    printf 'Declared scan directories contain Go files boundary.yaml does not classify as cnpatroni-owned:\n' >&2
+    sed 's/^/  /' "${inconsistent}" >&2
+    printf '%s\n' \
+      'Either the scan-unit table or hack/cnpatroni/upstream/boundary.yaml is wrong.' >&2
+    return 1
+  fi
+
   if ! collect_modules "${repo_root}" "${module_list}"; then
     return 1
   fi
 
-  if ! git -C "${repo_root}" check-attr \
-    --stdin \
-    -z \
-    cnpatroni-boundary \
-    <"${candidate_nul}" >"${attribute_output}"; then
-    printf 'Coverage assertion could not read cnpatroni-boundary attributes.\n' >&2
-    return 1
-  fi
-
-  : >"${owned_files}"
-  while IFS= read -r -d '' file; do
-    if ! IFS= read -r -d '' attribute || ! IFS= read -r -d '' value; then
-      printf 'Coverage assertion received malformed git attribute output.\n' >&2
-      return 1
-    fi
-    if [[ "${attribute}" == "cnpatroni-boundary" ]] &&
-      [[ "${value}" == "cnpatroni-owned" ]]; then
-      printf '%s\n' "${file}" >>"${owned_files}"
-    fi
-  done <"${attribute_output}"
-  LC_ALL=C sort -u -o "${owned_files}" "${owned_files}"
-
   : >"${uncovered}"
   while IFS= read -r file; do
     module="$(nearest_module_for_file "${file}" "${module_list}")"
-    if file_contains_line "${file}" "${owned_files}" ||
-      ! is_inherited_module "${module}"; then
-      fork_owned_count=$((fork_owned_count + 1))
-      if ! file_contains_line "${file}" "${scanned_files}"; then
-        printf '%s\t%s\n' "${module}" "${file}" >>"${uncovered}"
-      fi
+    if ! file_contains_line "${file}" "${owned_files}" &&
+      is_inherited_module "${module}"; then
+      continue
     fi
+    fork_owned_count=$((fork_owned_count + 1))
+    if file_is_in_scan_unit "${file}"; then
+      continue
+    fi
+    if file_is_explicitly_excluded "${file}"; then
+      excluded_count=$((excluded_count + 1))
+      continue
+    fi
+    printf '%s\n' "${file}" >>"${uncovered}"
   done <"${candidate_list}"
 
   if [[ -s "${uncovered}" ]]; then
-    LC_ALL=C sort "${uncovered}" >"${uncovered_sorted}"
     printf 'Fork-owned Go files are outside the declared code-hygiene scan units:\n' >&2
-    while IFS=$'\t' read -r module uncovered_file; do
-      if [[ "${module}" != "${current_module}" ]]; then
-        printf '  Module %s:\n' "${module}" >&2
-        current_module="${module}"
-      fi
-      printf '    %s\n' "${uncovered_file}" >&2
-    done <"${uncovered_sorted}"
+    sed 's/^/  /' "${uncovered}" >&2
     printf '%s\n' \
-      'This is deliberate fail-closed behaviour, not a bug in the gate.' \
-      "Add each path's module and directory to the scan-unit table in" \
-      'hack/cnpatroni/check-code-hygiene.sh, choosing dead-code roots appropriate' \
-      'to that module.' >&2
+      'Add a scan unit covering each path to hack/cnpatroni/check-code-hygiene.sh.' \
+      'If a path genuinely should not be scanned, add an explicit coverage exclusion' \
+      'there and record its written reason.' >&2
     return 1
   fi
 
-  printf 'Coverage: all %s fork-owned Go files are in declared scan units.\n' \
-    "${fork_owned_count}"
+  printf 'Coverage: all %s fork-owned Go files have declared coverage (%s explicit exclusions).\n' \
+    "${fork_owned_count}" "${excluded_count}"
+}
+
+unit_allows_test_only_packages() {
+  local unit_index="$1"
+  local argument
+
+  while IFS= read -r argument; do
+    if [[ "${argument}" == "-test" ]]; then
+      return 0
+    fi
+  done <<<"${SCAN_UNIT_DEADCODE_ARGUMENTS[${unit_index}]}"
+
+  return 1
 }
 
 check_orphan_packages() {
@@ -409,9 +600,13 @@ check_orphan_packages() {
   local package_name
   local has_tests
   local relative_directory
+  local allows_test_only_packages=0
 
   if [[ "${module}" != "." ]]; then
     working_directory="${repo_root}/${module}"
+  fi
+  if unit_allows_test_only_packages "${unit_index}"; then
+    allows_test_only_packages=1
   fi
 
   if ! (
@@ -449,11 +644,15 @@ check_orphan_packages() {
       ! file_contains_line "${package_directory}" "${scanned_directories}"; then
       continue
     fi
-    if ! file_contains_line "${import_path}" "${imports}" &&
-      [[ "${has_tests}" == "no" ]]; then
-      relative_directory="${package_directory#"${repo_root}/"}"
-      printf '%s\n' "${relative_directory}" >>"${orphans}"
+    if file_contains_line "${import_path}" "${imports}"; then
+      continue
     fi
+    if [[ "${has_tests}" == "yes" ]] &&
+      [[ "${allows_test_only_packages}" -eq 1 ]]; then
+      continue
+    fi
+    relative_directory="${package_directory#"${repo_root}/"}"
+    printf '%s\n' "${relative_directory}" >>"${orphans}"
   done <"${packages_output}"
 
   if [[ -s "${orphans}" ]]; then
@@ -509,7 +708,6 @@ main() {
   local repo_root
   local scanned_files
   local scanned_directories
-  local scan_files_collected=0
   local failures=0
   local index
   local argument
@@ -524,16 +722,20 @@ main() {
   scanned_directories="${hygiene_tmp}/scanned-package-directories"
 
   if ! validate_configuration; then
-    failures=1
+    printf 'CloudNativePatroni code hygiene failed.\n' >&2
+    return 1
   fi
 
-  if collect_scanned_files "${repo_root}" "${scanned_files}"; then
-    scan_files_collected=1
-    collect_scanned_package_directories \
-      "${repo_root}" "${scanned_files}" "${scanned_directories}"
-  else
-    failures=1
+  if ! collect_scanned_files "${repo_root}" "${scanned_files}"; then
+    printf 'CloudNativePatroni code hygiene failed.\n' >&2
+    return 1
   fi
+  if ! check_scan_coverage "${repo_root}" "${scanned_files}"; then
+    printf 'CloudNativePatroni code hygiene failed.\n' >&2
+    return 1
+  fi
+  collect_scanned_package_directories \
+    "${repo_root}" "${scanned_files}" "${scanned_directories}"
 
   for index in "${!SCAN_UNIT_MODULES[@]}"; do
     deadcode_arguments=()
@@ -556,21 +758,15 @@ main() {
     fi
   done
 
-  if [[ "${scan_files_collected}" -eq 1 ]]; then
-    if ! check_scan_coverage "${repo_root}" "${scanned_files}"; then
+  for index in "${!SCAN_UNIT_MODULES[@]}"; do
+    if ! check_orphan_packages \
+      "${repo_root}" "${scanned_directories}" "${index}"; then
       failures=1
     fi
+  done
 
-    for index in "${!SCAN_UNIT_MODULES[@]}"; do
-      if ! check_orphan_packages \
-        "${repo_root}" "${scanned_directories}" "${index}"; then
-        failures=1
-      fi
-    done
-
-    if ! check_duplication "${repo_root}" "${scanned_files}"; then
-      failures=1
-    fi
+  if ! check_duplication "${repo_root}" "${scanned_files}"; then
+    failures=1
   fi
 
   if [[ "${failures}" -ne 0 ]]; then

@@ -27,11 +27,6 @@ import (
 	"github.com/cloudnative-pg/cloudnative-pg/poc/oracle/internal/model"
 )
 
-// DispatchInstant computes T0+r*period without reference to earlier rounds.
-func DispatchInstant(start model.Instant, roundID int64, period time.Duration) model.Instant {
-	return start + model.Instant(roundID*int64(period))
-}
-
 // DispatchSkew returns max minus min dispatch time.
 func DispatchSkew(instants []model.Instant) time.Duration {
 	if len(instants) < 2 {

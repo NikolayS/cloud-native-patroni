@@ -104,15 +104,6 @@ var sqlSet = func() map[string]struct{} {
 	return result
 }()
 
-// Statements returns a defensive copy of the reviewed SQL inventory.
-func Statements() map[string]Statement {
-	result := make(map[string]Statement, len(statements))
-	for name, statement := range statements {
-		result[name] = statement
-	}
-	return result
-}
-
 // ValidateSQL rejects any statement not present byte-for-byte in the inventory.
 func ValidateSQL(sql string) error {
 	if _, ok := sqlSet[sql]; !ok {
