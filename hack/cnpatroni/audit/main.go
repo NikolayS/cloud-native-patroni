@@ -179,7 +179,7 @@ func printFindings(format string, res *ScanResult) int {
 }
 
 func runCheck(o *options) int {
-	_, res, err := o.load()
+	rules, res, err := o.load()
 	if err != nil {
 		return toolError(err)
 	}
@@ -192,7 +192,7 @@ func runCheck(o *options) int {
 		return toolError(err)
 	}
 
-	report := Check(res, cls, baseline, o.milestone)
+	report := Check(rules, res, cls, baseline, o.milestone)
 
 	for _, v := range report.Violations {
 		fmt.Fprintln(os.Stderr, v)
@@ -218,7 +218,7 @@ func runBaseline(o *options) int {
 		return runBaselineCompare(o)
 	}
 
-	_, res, err := o.load()
+	rules, res, err := o.load()
 	if err != nil {
 		return toolError(err)
 	}
@@ -227,7 +227,14 @@ func runBaseline(o *options) int {
 		return toolError(err)
 	}
 
-	baseline := BuildBaseline(FilterAllowed(res.Findings, cls), headCommit(o.root), nowUTC())
+	allowedTotal := 0
+	for _, finding := range res.Findings {
+		if finding.Severity == SeverityForbidden && cls.allows(finding) {
+			allowedTotal++
+		}
+	}
+	baseline := BuildBaseline(rules, res, FilterAllowed(res.Findings, cls), allowedTotal,
+		headCommit(o.root), nowUTC())
 	if !o.write {
 		fmt.Printf("authority baseline: %d forbidden hits in %d buckets\n",
 			baseline.Total, len(baseline.Buckets))
@@ -259,7 +266,8 @@ func runBaselineCompare(o *options) int {
 	if grew {
 		fmt.Fprintln(os.Stderr,
 			"the authority baseline grew; a change that adds forbidden calls needs an explicit"+
-				" human decision, not a regenerated baseline")
+				" human decision, not a regenerated baseline. Input weakening has no in-band approval;"+
+				" narrow the audit only by changing the audit tool itself, and review the rules diff")
 		return exitViolation
 	}
 	return exitClean
