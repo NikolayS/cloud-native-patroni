@@ -128,6 +128,164 @@ func TestLoadClassificationRejectsInvalidEntries(t *testing.T) {
 	}
 }
 
+const responsibilityClassification = `schema: cnpatroni-authority-classification/v1
+defaults:
+  owner: NikolayS
+responsibilities:
+  - responsibility: Exec and supervise the Postgres server process
+    dest: patroni-container
+    rationale: Patroni owns the postmaster process for its complete lifetime.
+    reviewed-at: "2026-08-09 23:20:00 UTC"
+    anchors: [example.com/hits/ctrl.Promote]
+`
+
+func TestLoadClassificationValidatesResponsibilities(t *testing.T) {
+	cls, err := loadClassificationFromString(t, responsibilityClassification)
+	if err != nil {
+		t.Fatalf("LoadClassification valid responsibility: %v", err)
+	}
+	if got := cls.Responsibilities[0].Owner; got != "NikolayS" {
+		t.Errorf("responsibility owner default = %q, want NikolayS", got)
+	}
+
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name: "missing owner",
+			body: replaceOnce(responsibilityClassification,
+				"defaults:\n  owner: NikolayS\n", ""),
+			wantErr: "no owner",
+		},
+		{
+			name: "missing description",
+			body: replaceOnce(responsibilityClassification,
+				"responsibility: Exec and supervise the Postgres server process",
+				"responsibility: \"\""),
+			wantErr: "no description",
+		},
+		{
+			name:    "unknown destination",
+			body:    replaceOnce(responsibilityClassification, "dest: patroni-container", "dest: nowhere"),
+			wantErr: "destination vocabulary",
+		},
+		{
+			name: "short rationale",
+			body: replaceOnce(responsibilityClassification,
+				"rationale: Patroni owns the postmaster process for its complete lifetime.",
+				"rationale: too short"),
+			wantErr: "rationale shorter",
+		},
+		{
+			name: "malformed review timestamp",
+			body: replaceOnce(responsibilityClassification,
+				`reviewed-at: "2026-08-09 23:20:00 UTC"`, `reviewed-at: "2026-08-09"`),
+			wantErr: "reviewed-at",
+		},
+		{
+			name:    "empty anchors",
+			body:    replaceOnce(responsibilityClassification, "anchors: [example.com/hits/ctrl.Promote]", "anchors: []"),
+			wantErr: "no anchors",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadClassificationFromString(t, tc.body)
+			if err == nil {
+				t.Fatal("LoadClassification accepted an invalid responsibility")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+const allowClassification = `schema: cnpatroni-authority-classification/v1
+defaults:
+  owner: NikolayS
+allow:
+  - rule: sync.standby-names
+    package: example.com/hits/pg/...
+    file: pg/config.go
+    symbol: example.com/hits/pg.Render
+    reason: This literal rejects operator-owned configuration rather than writing it.
+    reviewed-at: "2026-08-09 23:20:00 UTC"
+    until: M1
+`
+
+func TestLoadClassificationValidatesAllowEntries(t *testing.T) {
+	cls, err := loadClassificationFromString(t, allowClassification)
+	if err != nil {
+		t.Fatalf("LoadClassification valid allow entry: %v", err)
+	}
+	if got := cls.Allow[0].Owner; got != "NikolayS" {
+		t.Errorf("allow owner default = %q, want NikolayS", got)
+	}
+	allowed := Finding{
+		Rule: "sync.standby-names", Package: "example.com/hits/pg/config",
+		Path: "pg/config.go", Symbol: "example.com/hits/pg.Render",
+	}
+	if !cls.allows(allowed) {
+		t.Errorf("validated subtree allow entry did not cover %+v", allowed)
+	}
+	allowed.Path = "pg/other.go"
+	if cls.allows(allowed) {
+		t.Errorf("file-scoped allow entry covered the wrong path: %+v", allowed)
+	}
+
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name:    "missing rule",
+			body:    replaceOnce(allowClassification, "rule: sync.standby-names", "rule: \"\""),
+			wantErr: "no rule",
+		},
+		{
+			name:    "missing package",
+			body:    replaceOnce(allowClassification, "package: example.com/hits/pg/...", "package: \"\""),
+			wantErr: "no package",
+		},
+		{
+			name: "short reason",
+			body: replaceOnce(allowClassification,
+				"reason: This literal rejects operator-owned configuration rather than writing it.",
+				"reason: too short"),
+			wantErr: "reason shorter",
+		},
+		{
+			name: "missing owner",
+			body: replaceOnce(allowClassification,
+				"defaults:\n  owner: NikolayS\n", ""),
+			wantErr: "no owner",
+		},
+		{
+			name: "malformed review timestamp",
+			body: replaceOnce(allowClassification,
+				`reviewed-at: "2026-08-09 23:20:00 UTC"`, `reviewed-at: "yesterday"`),
+			wantErr: "reviewed-at",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := loadClassificationFromString(t, tc.body)
+			if err == nil {
+				t.Fatal("LoadClassification accepted an invalid allow entry")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestCheckReportsUnclassifiedFindingsByName(t *testing.T) {
 	res := result([]Finding{
 		{Rule: "proc.promote", Severity: SeverityForbidden, Symbol: "pkg.A", Path: "a.go", Line: 3, Col: 2},
@@ -321,6 +479,131 @@ func TestBuildBaselineCountsOnlyForbiddenFindings(t *testing.T) {
 	}
 }
 
+func TestLoadBaselineRejectsDishonestCounts(t *testing.T) {
+	valid := `schema: cnpatroni-authority-baseline/v1
+generated_from: abc123
+generated_at: 2026-08-09 23:20:00 UTC
+total: 1
+totals_by_rule:
+  proc.promote: 1
+buckets:
+  - rule: proc.promote
+    symbol: pkg.A
+    count: 1
+`
+	cases := []struct {
+		name    string
+		body    string
+		wantErr string
+	}{
+		{
+			name:    "total disagrees with buckets",
+			body:    replaceOnce(valid, "total: 1", "total: 2"),
+			wantErr: "total is 2, but buckets sum to 1",
+		},
+		{
+			name:    "rule total disagrees with buckets",
+			body:    replaceOnce(valid, "proc.promote: 1", "proc.promote: 2"),
+			wantErr: "totals_by_rule for proc.promote is 2, but buckets sum to 1",
+		},
+		{
+			name: "duplicate bucket",
+			body: valid + `  - rule: proc.promote
+    symbol: pkg.A
+    count: 1
+`,
+			wantErr: "duplicate bucket",
+		},
+		{
+			name:    "zero bucket count",
+			body:    replaceOnce(valid, "count: 1", "count: 0"),
+			wantErr: "count must be positive",
+		},
+		{
+			name:    "missing bucket symbol",
+			body:    replaceOnce(valid, "symbol: pkg.A", "symbol: \"\""),
+			wantErr: "has no symbol",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "baseline.yaml")
+			writeFile(t, path, tc.body)
+
+			_, err := LoadBaseline(path)
+			if err == nil {
+				t.Fatal("LoadBaseline accepted a dishonest baseline")
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Errorf("error %q does not contain %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestBaselineWriteRoundTripsExactData(t *testing.T) {
+	baseline := BuildBaseline([]Finding{
+		{Rule: "role.primary", Severity: SeverityForbidden, Symbol: "pkg.B"},
+		{Rule: "proc.promote", Severity: SeverityForbidden, Symbol: "pkg.A"},
+	}, "abc123", "2026-08-09 23:20:00 UTC")
+	path := filepath.Join(t.TempDir(), "baseline.yaml")
+
+	if err := baseline.Write(path); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if !strings.HasPrefix(string(body), "# Generated by hack/cnpatroni/audit;") {
+		t.Errorf("baseline header is missing: %q", body)
+	}
+
+	loaded, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+	if loaded.GeneratedFrom != "abc123" || loaded.GeneratedAt != "2026-08-09 23:20:00 UTC" {
+		t.Errorf("provenance = %q at %q", loaded.GeneratedFrom, loaded.GeneratedAt)
+	}
+	if loaded.Total != 2 || loaded.TotalsByRule["proc.promote"] != 1 ||
+		loaded.TotalsByRule["role.primary"] != 1 {
+		t.Errorf("loaded totals = total %d, by rule %v", loaded.Total, loaded.TotalsByRule)
+	}
+	if len(loaded.Buckets) != 2 || loaded.Buckets[0].Rule != "proc.promote" ||
+		loaded.Buckets[0].Symbol != "pkg.A" || loaded.Buckets[1].Rule != "role.primary" ||
+		loaded.Buckets[1].Symbol != "pkg.B" {
+		t.Errorf("loaded buckets = %+v, want deterministic rule and symbol order", loaded.Buckets)
+	}
+}
+
+func TestBaselineIOReportsSpecificErrors(t *testing.T) {
+	t.Run("missing input", func(t *testing.T) {
+		_, err := LoadBaseline(filepath.Join(t.TempDir(), "missing.yaml"))
+		if err == nil || !strings.Contains(err.Error(), "reading baseline") {
+			t.Fatalf("error = %v, want a baseline read error", err)
+		}
+	})
+
+	t.Run("malformed yaml", func(t *testing.T) {
+		path := filepath.Join(t.TempDir(), "baseline.yaml")
+		writeFile(t, path, "schema: [\n")
+		_, err := LoadBaseline(path)
+		if err == nil || !strings.Contains(err.Error(), "parsing baseline yaml") {
+			t.Fatalf("error = %v, want a baseline parse error", err)
+		}
+	})
+
+	t.Run("missing output directory", func(t *testing.T) {
+		baseline := BuildBaseline(nil, "abc123", "2026-08-09 23:20:00 UTC")
+		err := baseline.Write(filepath.Join(t.TempDir(), "missing", "baseline.yaml"))
+		if err == nil || !strings.Contains(err.Error(), "writing baseline") {
+			t.Fatalf("error = %v, want a baseline write error", err)
+		}
+	})
+}
+
 func TestCompareBaselinesFailsOnlyWhenTheBaselineGrows(t *testing.T) {
 	base := &Baseline{Schema: baselineSchema, Total: 300, TotalsByRule: map[string]int{"proc.promote": 3}}
 
@@ -365,6 +648,34 @@ func TestCompareBaselinesFailsOnlyWhenTheBaselineGrows(t *testing.T) {
 				t.Errorf("lines %v do not contain %q", lines, tc.wantLine)
 			}
 		})
+	}
+}
+
+func TestCompareBaselinesRejectsARenamedBucket(t *testing.T) {
+	base := &Baseline{
+		Schema:       baselineSchema,
+		Total:        1,
+		TotalsByRule: map[string]int{"proc.promote": 1},
+		Buckets: []Bucket{{
+			Rule: "proc.promote", Symbol: "pkg.OldName", Count: 1,
+		}},
+	}
+	head := &Baseline{
+		Schema:       baselineSchema,
+		Total:        1,
+		TotalsByRule: map[string]int{"proc.promote": 1},
+		Buckets: []Bucket{{
+			Rule: "proc.promote", Symbol: "pkg.NewName", Count: 1,
+		}},
+	}
+
+	grew, lines := CompareBaselines(base, head)
+
+	if !grew {
+		t.Fatalf("renaming a forbidden bucket passed the ratchet: %v", lines)
+	}
+	if !containsSubstring(lines, "pkg.NewName") {
+		t.Errorf("comparison does not name the new bucket: %v", lines)
 	}
 }
 

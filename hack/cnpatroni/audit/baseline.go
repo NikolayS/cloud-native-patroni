@@ -109,8 +109,60 @@ func LoadBaseline(path string) (*Baseline, error) {
 	if b.TotalsByRule == nil {
 		b.TotalsByRule = map[string]int{}
 	}
+	if err := b.validate(); err != nil {
+		return nil, err
+	}
 
 	return &b, nil
+}
+
+func (b *Baseline) validate() error {
+	seen := map[Bucket]bool{}
+	byRule := map[string]int{}
+	total := 0
+	for i, bucket := range b.Buckets {
+		switch {
+		case bucket.Rule == "":
+			return fmt.Errorf("baseline bucket %d has no rule", i)
+		case bucket.Symbol == "":
+			return fmt.Errorf("baseline bucket %d has no symbol", i)
+		case bucket.Count <= 0:
+			return fmt.Errorf("baseline bucket %s in %s count must be positive, got %d",
+				bucket.Rule, bucket.Symbol, bucket.Count)
+		}
+
+		key := Bucket{Rule: bucket.Rule, Symbol: bucket.Symbol}
+		if seen[key] {
+			return fmt.Errorf("duplicate bucket for %s in %s", bucket.Rule, bucket.Symbol)
+		}
+		seen[key] = true
+		byRule[bucket.Rule] += bucket.Count
+		total += bucket.Count
+	}
+
+	if b.Total != total {
+		return fmt.Errorf("baseline total is %d, but buckets sum to %d", b.Total, total)
+	}
+	rules := map[string]bool{}
+	for rule := range byRule {
+		rules[rule] = true
+	}
+	for rule := range b.TotalsByRule {
+		rules[rule] = true
+	}
+	names := make([]string, 0, len(rules))
+	for rule := range rules {
+		names = append(names, rule)
+	}
+	slices.Sort(names)
+	for _, rule := range names {
+		if b.TotalsByRule[rule] != byRule[rule] {
+			return fmt.Errorf("baseline totals_by_rule for %s is %d, but buckets sum to %d",
+				rule, b.TotalsByRule[rule], byRule[rule])
+		}
+	}
+
+	return nil
 }
 
 // Write renders the baseline.
@@ -169,6 +221,25 @@ func CompareBaselines(base, head *Baseline) (grew bool, lines []string) {
 		if after > before {
 			grew = true
 		}
+	}
+
+	baseBuckets := base.index()
+	headBuckets := head.index()
+	keys := make([]Bucket, 0, len(headBuckets))
+	for bucket := range headBuckets {
+		keys = append(keys, bucket)
+	}
+	slices.SortFunc(keys, func(a, b Bucket) int {
+		return compareAll(strings.Compare(a.Rule, b.Rule), strings.Compare(a.Symbol, b.Symbol))
+	})
+	for _, bucket := range keys {
+		before, after := baseBuckets[bucket], headBuckets[bucket]
+		if after <= before {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("  new or enlarged bucket: %s in %s %d -> %d",
+			bucket.Rule, bucket.Symbol, before, after))
+		grew = true
 	}
 
 	return grew, lines

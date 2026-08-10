@@ -74,6 +74,8 @@ func TestScanMatchesExactlyTheExpectedHits(t *testing.T) {
 		"proc.startstop example.com/hits/ctrl.StopBoth ctrl/ctrl.go:40",
 		"role.target-primary example.com/hits/ctrl.SetPrimary ctrl/ctrl.go:46",
 		"role.current-primary-read example.com/hits/ctrl.ReadPrimary ctrl/ctrl.go:51",
+		"proc.exec-pgctl example.com/hits/ctrl.ExecPgCtl ctrl/exec.go:30",
+		"proc.exec-pgctl example.com/hits/ctrl.ExecPgCtlContext ctrl/exec.go:33",
 		"guard.call example.com/hits/ctrl.GuardedOK ctrl/guarded.go:25",
 		"guard.call example.com/hits/ctrl.GuardedWrongLiteral ctrl/guarded.go:28",
 	}
@@ -82,6 +84,37 @@ func TestScanMatchesExactlyTheExpectedHits(t *testing.T) {
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("scan findings mismatch\n got:\n%s\nwant:\n%s",
 			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestScanFiltersCallsByConstantArguments(t *testing.T) {
+	findings := scanFixture(t, "mod-hits", loadFixtureRules(t))
+	matched := map[string]bool{}
+	for _, finding := range findings {
+		if finding.Rule == "proc.exec-pgctl" {
+			matched[finding.Symbol] = true
+		}
+	}
+
+	want := map[string]bool{
+		"example.com/hits/ctrl.ExecPgCtl":        true,
+		"example.com/hits/ctrl.ExecPgCtlContext": true,
+	}
+	if len(matched) != len(want) {
+		t.Fatalf("pg_ctl call symbols = %v, want exactly %v", matched, want)
+	}
+	for symbol := range want {
+		if !matched[symbol] {
+			t.Errorf("constant pg_ctl call %s was not reported", symbol)
+		}
+	}
+	for _, symbol := range []string{
+		"example.com/hits/ctrl.ExecDynamic",
+		"example.com/hits/ctrl.ExecUnrelated",
+	} {
+		if matched[symbol] {
+			t.Errorf("non-matching call %s was reported", symbol)
+		}
 	}
 }
 
@@ -177,6 +210,55 @@ func TestScanExcludesPathsByGlob(t *testing.T) {
 func TestScanOfACleanModuleFindsNothing(t *testing.T) {
 	if findings := scanFixture(t, "mod-clean", loadFixtureRules(t)); len(findings) != 0 {
 		t.Errorf("clean module produced %d findings: %v", len(findings), findingKeys(findings))
+	}
+}
+
+func TestScanRepoMergesRootsAndPrefixesPaths(t *testing.T) {
+	rules := loadFixtureRules(t)
+	rules.Scope.Roots = []string{"mod-hits", "mod-clean"}
+
+	res, err := ScanRepo("testdata", rules)
+	if err != nil {
+		t.Fatalf("ScanRepo: %v", err)
+	}
+
+	want := []string{
+		"recovery.standby-signal example.com/hits/ctrl.init mod-hits/ctrl/ctrl.go:32",
+		"proc.promote example.com/hits/ctrl.Promote mod-hits/ctrl/ctrl.go:35",
+		"proc.startstop example.com/hits/ctrl.StopBoth mod-hits/ctrl/ctrl.go:40",
+		"role.target-primary example.com/hits/ctrl.SetPrimary mod-hits/ctrl/ctrl.go:46",
+		"role.current-primary-read example.com/hits/ctrl.ReadPrimary mod-hits/ctrl/ctrl.go:51",
+		"proc.exec-pgctl example.com/hits/ctrl.ExecPgCtl mod-hits/ctrl/exec.go:30",
+		"proc.exec-pgctl example.com/hits/ctrl.ExecPgCtlContext mod-hits/ctrl/exec.go:33",
+		"guard.call example.com/hits/ctrl.GuardedOK mod-hits/ctrl/guarded.go:25",
+		"guard.call example.com/hits/ctrl.GuardedWrongLiteral mod-hits/ctrl/guarded.go:28",
+	}
+	if got := findingKeys(res.Findings); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("merged findings mismatch\n got:\n%s\nwant:\n%s",
+			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	if res.Packages != 6 {
+		t.Errorf("packages = %d, want 6 across both roots", res.Packages)
+	}
+	if res.Files != 7 {
+		t.Errorf("files = %d, want 7 across both roots after exclusions", res.Files)
+	}
+	if got := res.GuardOps["example.com/hits/ctrl.GuardedOK"]; len(got) != 1 ||
+		got[0] != "example.com/hits/ctrl.GuardedOK" {
+		t.Errorf("guard ops = %v, want the exact enclosing symbol", got)
+	}
+}
+
+func TestScanRepoReportsAMissingRootAsAToolError(t *testing.T) {
+	rules := loadFixtureRules(t)
+	rules.Scope.Roots = []string{"does-not-exist"}
+
+	_, err := ScanRepo("testdata", rules)
+	if err == nil {
+		t.Fatal("ScanRepo accepted a missing scan root")
+	}
+	if !strings.Contains(err.Error(), "does-not-exist") {
+		t.Errorf("error %q does not name the missing root", err)
 	}
 }
 

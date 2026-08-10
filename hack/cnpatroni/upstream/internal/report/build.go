@@ -159,8 +159,17 @@ func Build(opts Options) (*Report, error) {
 // relativeToRoot renders a path relative to the repository root, so that a
 // report is identical no matter where the clone lives.
 func relativeToRoot(root, path string) string {
-	rel, err := filepath.Rel(root, path)
-	if err != nil || strings.HasPrefix(rel, "..") {
+	canonicalRoot := root
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		canonicalRoot = resolved
+	}
+	canonicalPath := path
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		canonicalPath = resolved
+	}
+
+	rel, err := filepath.Rel(canonicalRoot, canonicalPath)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return path
 	}
 

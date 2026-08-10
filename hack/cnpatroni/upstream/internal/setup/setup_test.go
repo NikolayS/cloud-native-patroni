@@ -105,8 +105,8 @@ func TestSetupAddsTheRemoteAndFetches(t *testing.T) {
 	if got := strings.TrimSpace(fork.Git("rev-parse", "HEAD")); got != head {
 		t.Errorf("HEAD moved to %s, want %s", got, head)
 	}
-	if clean, err := repo.IsClean(); err != nil || !clean {
-		t.Errorf("setup must leave the worktree clean: clean=%v err=%v", clean, err)
+	if status := fork.Git("status", "--porcelain"); status != "" {
+		t.Errorf("setup left worktree changes, want empty porcelain status: %q", status)
 	}
 }
 

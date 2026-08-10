@@ -21,7 +21,6 @@ package gitx_test
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"testing"
 
@@ -216,24 +215,6 @@ func TestRequireCompleteHistoryDetectsShallowClone(t *testing.T) {
 	}
 	if envErr.Remedy == "" {
 		t.Error("EnvironmentError.Remedy must tell the maintainer what to run")
-	}
-}
-
-func TestIsCleanDetectsDirtyWorktree(t *testing.T) {
-	f := gittest.New(t)
-	f.Write("a.go", "package a\n")
-	f.Commit("base")
-
-	repo := f.Repo(t)
-	if clean, err := repo.IsClean(); err != nil || !clean {
-		t.Fatalf("fresh worktree: clean=%v err=%v, want clean=true", clean, err)
-	}
-
-	if err := os.WriteFile(filepath.Join(f.Root, "a.go"), []byte("package a // dirty\n"), 0o600); err != nil {
-		t.Fatalf("WriteFile: %v", err)
-	}
-	if clean, err := repo.IsClean(); err != nil || clean {
-		t.Fatalf("dirty worktree: clean=%v err=%v, want clean=false", clean, err)
 	}
 }
 

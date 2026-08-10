@@ -94,12 +94,7 @@ type Baseline struct {
 	LastIntegrated Point         `yaml:"last_integrated"`
 	Compatibility  Compatibility `yaml:"compatibility"`
 	NotAdopted     []Refusal     `yaml:"not_adopted"`
-
-	path string
 }
-
-// Path returns the file the baseline was loaded from.
-func (b *Baseline) Path() string { return b.path }
 
 // Load reads and parses a baseline file.
 func Load(path string) (*Baseline, error) {
@@ -112,8 +107,6 @@ func Load(path string) (*Baseline, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	b.path = path
-
 	return b, nil
 }
 
