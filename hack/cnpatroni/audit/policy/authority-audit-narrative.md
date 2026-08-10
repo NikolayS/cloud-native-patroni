@@ -1,0 +1,128 @@
+This section answers owner directive D-5. The decision to adopt Patroni is settled and this audit does
+not reopen it. What the audit has to establish is whether the fork is feasible on the terms the
+specification assumes: that the authority is concentrated, that the entangled non-HA machinery which
+must relocate is a bounded amount of work, and that the resulting diff stays concentrated enough for
+upstream integration to remain affordable.
+
+Every number below is substituted from the scan at render time. The two measurements the scanner
+cannot take, both about upstream churn, are marked as such and carry their command.
+
+### The finding, in three sentences
+
+CloudNativePG's high-availability authority is concentrated: {{.ForbiddenHits}} forbidden hits sit in
+{{.ForbiddenSymbols}} functions across {{.ForbiddenFiles}} files and {{.ForbiddenPackages}} packages,
+of which `{{.HighestRulePkg}}` alone accounts for {{.HighestRulePkgPct}} per cent and the three
+largest packages together account for {{.TopThreePkgPct}} per cent. The entangled non-HA machinery is
+a bounded relocation rather than a rewrite: of the {{.Responsibilities}} instance-manager
+responsibilities, the ones that keep a home are a handful of in-database reconcilers, credential
+rotation, metrics, logs and the backup endpoints, and their only shared change is that each must ask
+Patroni which instance is the leader instead of reading the CloudNativePG cluster status. The fork is feasible on the specification's terms, with one
+qualification that has to be stated rather than smoothed over: the diff is concentrated by package
+but not by file, because the largest single site,
+`pkg/management/postgres/instance.go`, is also a file upstream edits regularly, so the ongoing
+integration cost is dominated by a small number of hot files rather than spread thinly.
+
+### 1. How concentrated is the authority
+
+| Measure | Value |
+|---|---:|
+| Forbidden hits | {{.ForbiddenHits}} |
+| Functions containing them | {{.ForbiddenSymbols}} |
+| Files containing them | {{.ForbiddenFiles}} |
+| Packages containing them | {{.ForbiddenPackages}} |
+| Go files inspected in total | {{.Files}} |
+| Share of forbidden hits in `{{.HighestRulePkg}}` | {{.HighestRulePkgPct}} per cent |
+| Share of forbidden hits in the three largest packages | {{.TopThreePkgPct}} per cent |
+| Recorded in the baseline after the allowlist | {{.Baseline.Total}} |
+| Baseline buckets, keyed by rule and symbol | {{len .Baseline.Buckets}} |
+
+{{.ForbiddenFiles}} files out of {{.Files}} inspected carry the authority that has to become
+unreachable. That is the number the specification's assumption rests on, and it holds.
+
+The call-graph shape matters as much as the count. The forbidden primitives are reached through few
+entry points: promotion has exactly one caller, the postmaster exec has exactly one caller, and the
+single operator-side writer of the desired-primary field is one function. Milestone M1 therefore has
+a small number of cut points rather than a diffuse edit, which is what makes the runtime guard a
+practical mechanism rather than a gesture.
+
+Two authority paths were found that the specification's own high-risk file list in section 9.2 does
+not name, and both would have been left live by a change that followed that list literally:
+
+- the Lease renewal, take-over and preemption logic lives in
+  `internal/cmd/manager/instance/run/lease`, not in `internal/controller/primary_lease.go`, which
+  only creates the Lease object. The preemption branch shuts the manager down and stops PostgreSQL;
+- the promotion-candidate selector is a `sort.Interface` implementation,
+  `(*PostgresqlStatusList).Less`, whose caller takes the first element. A selection rule hidden in a
+  sort is exactly what an upstream merge reintroduces without anyone noticing.
+
+Both are classified here, which is the point of running the scan rather than transcribing the list.
+
+### 2. What must relocate, and how much of it there is
+
+Two tables are needed here, and reading only the first would mislead. The classification counts
+describe the symbols the scanner surfaced, and the scanner surfaces authority paths by construction,
+so that table is heavily weighted towards "disable" and says nothing about how much safe machinery
+has to move. The responsibility destinations are the honest measure of relocation volume.
+
+| Class | Symbols |
+|---|---:|
+{{range .ByClass}}| {{.Name}} | {{.Count}} |
+{{end}}
+| Destination | Classified symbols | Responsibilities |
+|---|---:|---:|
+{{range $i, $d := .ByDest}}| {{$d.Name}} | {{$d.Count}} | {{(index $.RespByDest $i).Count}} |
+{{end}}
+The relocation work is real but bounded. The instance manager holds
+{{.Responsibilities}} distinct responsibilities in
+[the responsibility map](responsibility-map.md); the ones that have to move rather than disappear are
+the declarative in-database reconcilers, credential rotation, the metrics exporter, the log pipes and
+the backup remote procedure calls, all of which are ordinary SQL and file work with no process
+authority. Their only common change is that each one currently asks the CloudNativePG cluster status
+which instance is the primary, and each must instead ask Patroni. That is one substitution applied in
+several places, not several designs.
+
+Two pieces of relocation are harder than the rest and should be planned as such: the filesystem
+preparation that currently runs inside the long-lived instance manager has to become a finite init
+that exits, and the replication and rewind users have to be created where Patroni can find them.
+Neither is architecturally novel; both are places where getting the ordering wrong produces a
+cluster that starts and then fails later.
+
+### 3. Does the diff stay concentrated
+
+By package, yes: {{.TopThreePkgPct}} per cent of the forbidden hits are in three packages, and
+{{.ForbiddenPackages}} packages hold all of them. Classified symbols touch
+{{.ClassifiedFiles}} files in {{.ClassifiedPackages}} directories.
+
+By file, the answer needs a caveat. The concentration is achieved partly because
+`pkg/management/postgres/instance.go` is a large file that holds many primitives at once, and a large
+frequently-edited file is the worst place for a fork's diff to live: every upstream change to it is a
+potential conflict, whether or not it touches the parts we changed.
+
+The two churn measurements below were taken by hand on 2026-08-10, because they are statements about
+git history rather than about the current tree, and the scanner deliberately does not read history:
+
+```bash
+git log --name-only --format= HEAD~48..HEAD | grep '\.go$' | sort -u | wc -l
+```
+
+Over the 48 upstream commits available in this clone, 105 Go files were modified, and 9 of the
+{{.ForbiddenFiles}} files carrying forbidden hits were among them. The measurement is bounded: this
+is a shallow clone, so 48 commits is roughly a fortnight of upstream activity and not a release
+cycle. It should be repeated against a full clone before the M1 plan is fixed, and the result
+recorded here. Taken at face value it says that roughly a quarter of the files the fork must change
+are also files upstream touches within any two-week window, which is the number that predicts the
+long-term integration cost.
+
+The mitigation the specification already provides is the right one, and this audit is part of it:
+the surgery is expressed as small, local cuts at named symbols, each guarded and each recorded here,
+rather than as a restructuring of the files that hold them. A cut of a few lines inside a hot file
+conflicts far less often than a reorganisation of the same file.
+
+### What this finding does not claim
+
+It does not claim that the audit proves the authority is gone. A static analysis cannot see through
+reflection or through an interface whose implementation is chosen at run time, which is why the
+specification places the real proof in the M3 chaos suite. It does not claim anything about Patroni's
+own behaviour, which is upstream's and outside this repository. And it does not claim that a
+concentrated diff makes upstream integration cheap; it makes it affordable, and the churn measurement
+above is the number to watch.
