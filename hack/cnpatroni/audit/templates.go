@@ -99,7 +99,7 @@ The baseline is the ratchet. On day one this repository is unmodified CloudNativ
 forbidden calls, so a gate that failed on any of them would be red from the first commit and would be
 switched off within a week. The recorded totals may fall and must never rise.
 
-Recorded from commit ` + "`{{.Baseline.GeneratedFrom}}`" + ` at {{.Baseline.GeneratedAt}}.
+{{if .Baseline.ForkBase}}Taken from commit ` + "`{{.Baseline.ForkBase}}`" + `.{{else}}Taken from commit: fork base not recorded.{{end}} Last regenerated from ` + "`{{.Baseline.GeneratedFrom}}`" + ` at {{.Baseline.GeneratedAt}}.
 
 | Measure | Value |
 |---|---:|

@@ -22,13 +22,17 @@ package main
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
 
-const baselineSchema = "cnpatroni-authority-baseline/v2"
+const (
+	baselineSchema       = "cnpatroni-authority-baseline/v2"
+	upstreamBaselinePath = "hack/cnpatroni/upstream/upstream-baseline.yaml"
+)
 
 // Baseline is the ratchet. On day one this repository is unmodified
 // CloudNativePG and is full of forbidden calls, so a gate that fails on any of
@@ -41,6 +45,7 @@ const baselineSchema = "cnpatroni-authority-baseline/v2"
 // without being noticed. A new function is always a new bucket.
 type Baseline struct {
 	Schema        string         `yaml:"schema"`
+	ForkBase      string         `yaml:"fork_base"`
 	GeneratedFrom string         `yaml:"generated_from"`
 	GeneratedAt   string         `yaml:"generated_at"`
 	Total         int            `yaml:"total"`
@@ -48,6 +53,30 @@ type Baseline struct {
 	TotalsByRule  map[string]int `yaml:"totals_by_rule"`
 	Inputs        Inputs         `yaml:"inputs"`
 	Buckets       []Bucket       `yaml:"buckets"`
+}
+
+type upstreamBaseline struct {
+	ForkBase struct {
+		Commit string `yaml:"commit"`
+	} `yaml:"fork_base"`
+}
+
+func loadForkBase(root string) (string, error) {
+	path := filepath.Join(root, filepath.FromSlash(upstreamBaselinePath))
+	raw, err := os.ReadFile(path) //nolint:gosec // root is operator-supplied configuration
+	if err != nil {
+		return "", fmt.Errorf("reading %s field fork_base.commit: %w", upstreamBaselinePath, err)
+	}
+
+	var source upstreamBaseline
+	if err := yaml.Unmarshal(raw, &source); err != nil {
+		return "", fmt.Errorf("parsing %s field fork_base.commit: %w", upstreamBaselinePath, err)
+	}
+	commit := strings.TrimSpace(source.ForkBase.Commit)
+	if commit == "" {
+		return "", fmt.Errorf("%s field fork_base.commit is empty", upstreamBaselinePath)
+	}
+	return commit, nil
 }
 
 // Inputs is what the totals were measured with. A count without its measurement
@@ -136,7 +165,7 @@ type Bucket struct {
 // BuildBaseline counts the forbidden findings. Inventory and observe findings
 // are deliberately excluded: they are triage material, not debt to burn down.
 func BuildBaseline(rules *RuleSet, res *ScanResult, findings []Finding, allowedTotal int,
-	commit, generatedAt string,
+	generatedFrom, generatedAt string,
 ) *Baseline {
 	counts := map[Bucket]int{}
 	byRule := map[string]int{}
@@ -162,7 +191,7 @@ func BuildBaseline(rules *RuleSet, res *ScanResult, findings []Finding, allowedT
 
 	return &Baseline{
 		Schema:        baselineSchema,
-		GeneratedFrom: commit,
+		GeneratedFrom: generatedFrom,
 		GeneratedAt:   generatedAt,
 		Total:         total,
 		AllowedTotal:  allowedTotal,

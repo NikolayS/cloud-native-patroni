@@ -108,8 +108,11 @@ func TestConcentrationCoversZeroOneAndManyPackages(t *testing.T) {
 
 func TestDocumentRenderingAndWriteErrors(t *testing.T) {
 	data := &docData{
-		Rules:    "policy/rules.yaml",
-		Baseline: &Baseline{},
+		Rules: "policy/rules.yaml",
+		Baseline: &Baseline{
+			GeneratedFrom: "head-123",
+			GeneratedAt:   "2026-08-10 12:00:00 UTC",
+		},
 		ResponsibilityRows: []Responsibility{{
 			Responsibility: "Run Postgres", Dest: "patroni-container",
 			Rationale: "Patroni supervises the server process.",
@@ -126,6 +129,22 @@ func TestDocumentRenderingAndWriteErrors(t *testing.T) {
 	if !strings.Contains(audit, "The scanner narrative is rendered here.") ||
 		!strings.Contains(audit, "policy/rules.yaml") {
 		t.Errorf("audit output is missing its narrative or rules path:\n%s", audit)
+	}
+	wantAbsent := "Taken from commit: fork base not recorded. " +
+		"Last regenerated from `head-123` at 2026-08-10 12:00:00 UTC."
+	if !strings.Contains(audit, wantAbsent) {
+		t.Errorf("audit output does not distinguish an absent fork base:\n%s", audit)
+	}
+
+	data.Baseline.ForkBase = "fork-base-123"
+	auditWithForkBase, err := renderAudit(narrative, data)
+	if err != nil {
+		t.Fatalf("renderAudit with fork base: %v", err)
+	}
+	wantPresent := "Taken from commit `fork-base-123`. " +
+		"Last regenerated from `head-123` at 2026-08-10 12:00:00 UTC."
+	if !strings.Contains(auditWithForkBase, wantPresent) {
+		t.Errorf("audit output does not label both commits:\n%s", auditWithForkBase)
 	}
 	responsibilities, err := renderResponsibilityMap(data)
 	if err != nil {
