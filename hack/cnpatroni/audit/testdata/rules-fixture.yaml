@@ -37,6 +37,13 @@ rules:
     call_arg_contains:
       - pg_ctl
 
+  - id: lease.primary
+    severity: forbidden
+    spec: "7.4 bullet 8"
+    message: the leader lock is Patroni's DCS lock
+    imports:
+      - example.com/hits/lease
+
   - id: recovery.standby-signal
     severity: forbidden
     spec: "7.4 bullet 3"

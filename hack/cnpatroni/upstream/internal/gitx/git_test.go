@@ -59,6 +59,31 @@ func TestOpenFindsRepositoryRoot(t *testing.T) {
 	}
 }
 
+func TestShortSHA(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "full SHA",
+			input: "0123456789abcdef0123456789abcdef01234567",
+			want:  "0123456789ab",
+		},
+		{name: "twelve characters", input: "abcdefghijkl", want: "abcdefghijkl"},
+		{name: "thirteen characters", input: "abcdefghijklm", want: "abcdefghijkl"},
+		{name: "empty", input: "", want: ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := gitx.ShortSHA(tc.input); got != tc.want {
+				t.Errorf("ShortSHA(%q) = %q, want %q", tc.input, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestChangedFilesReportsStatusAndPaths(t *testing.T) {
 	f := gittest.New(t)
 	f.Write("keep.go", "package keep\n")

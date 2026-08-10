@@ -78,12 +78,64 @@ func TestScanMatchesExactlyTheExpectedHits(t *testing.T) {
 		"proc.exec-pgctl example.com/hits/ctrl.ExecPgCtlContext ctrl/exec.go:33",
 		"guard.call example.com/hits/ctrl.GuardedOK ctrl/guarded.go:25",
 		"guard.call example.com/hits/ctrl.GuardedWrongLiteral ctrl/guarded.go:28",
+		"lease.primary example.com/hits/ctrl.imports ctrl/lease.go:24",
 	}
 
 	got := findingKeys(findings)
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("scan findings mismatch\n got:\n%s\nwant:\n%s",
 			strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+func TestScanReportsForbiddenImports(t *testing.T) {
+	findings := scanFixture(t, "mod-hits", loadFixtureRules(t))
+	var leaseFindings []Finding
+	for _, finding := range findings {
+		if finding.Detail == "import of example.com/hits" {
+			t.Errorf("the prefix import path matched a rule: %+v", finding)
+		}
+		if finding.Detail == "import of example.com/hits/leaseholder" {
+			t.Errorf("the containing import path matched a rule: %+v", finding)
+		}
+		if finding.Rule != "lease.primary" {
+			continue
+		}
+		leaseFindings = append(leaseFindings, finding)
+		for _, packagePath := range []string{"example.com/hits/pg", "example.com/hits/api"} {
+			if finding.Package == packagePath {
+				t.Errorf("package %s produced a lease.primary finding: %+v", packagePath, finding)
+			}
+		}
+	}
+
+	if len(leaseFindings) != 1 {
+		t.Fatalf("lease.primary findings = %+v, want exactly one", leaseFindings)
+	}
+	got := struct {
+		Rule   string
+		Symbol string
+		Path   string
+		Detail string
+	}{
+		Rule:   leaseFindings[0].Rule,
+		Symbol: leaseFindings[0].Symbol,
+		Path:   leaseFindings[0].Path,
+		Detail: leaseFindings[0].Detail,
+	}
+	want := struct {
+		Rule   string
+		Symbol string
+		Path   string
+		Detail string
+	}{
+		Rule:   "lease.primary",
+		Symbol: "example.com/hits/ctrl.imports",
+		Path:   "ctrl/lease.go",
+		Detail: "import of example.com/hits/lease",
+	}
+	if got != want {
+		t.Errorf("forbidden import finding = %+v, want %+v", got, want)
 	}
 }
 
@@ -232,16 +284,17 @@ func TestScanRepoMergesRootsAndPrefixesPaths(t *testing.T) {
 		"proc.exec-pgctl example.com/hits/ctrl.ExecPgCtlContext mod-hits/ctrl/exec.go:33",
 		"guard.call example.com/hits/ctrl.GuardedOK mod-hits/ctrl/guarded.go:25",
 		"guard.call example.com/hits/ctrl.GuardedWrongLiteral mod-hits/ctrl/guarded.go:28",
+		"lease.primary example.com/hits/ctrl.imports mod-hits/ctrl/lease.go:24",
 	}
 	if got := findingKeys(res.Findings); strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("merged findings mismatch\n got:\n%s\nwant:\n%s",
 			strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
-	if res.Packages != 6 {
-		t.Errorf("packages = %d, want 6 across both roots", res.Packages)
+	if res.Packages != 9 {
+		t.Errorf("packages = %d, want 9 across both roots", res.Packages)
 	}
-	if res.Files != 7 {
-		t.Errorf("files = %d, want 7 across both roots after exclusions", res.Files)
+	if res.Files != 11 {
+		t.Errorf("files = %d, want 11 across both roots after exclusions", res.Files)
 	}
 	if got := res.GuardOps["example.com/hits/ctrl.GuardedOK"]; len(got) != 1 ||
 		got[0] != "example.com/hits/ctrl.GuardedOK" {

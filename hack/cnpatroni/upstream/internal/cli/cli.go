@@ -376,7 +376,7 @@ func runReport(args []string, g globals, stdout, stderr io.Writer) int {
 	dir := *outDir
 	if dir == "" {
 		dir = filepath.Join(repo.Root, filepath.FromSlash(defaultReportDir),
-			fmt.Sprintf("%s-%s", r.Range.To.Date, shortSHA(r.Range.To.Commit)))
+			fmt.Sprintf("%s-%s", r.Range.To.Date, gitx.ShortSHA(r.Range.To.Commit)))
 	}
 	if err := writeReport(dir, r); err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
@@ -407,12 +407,4 @@ func writeReport(dir string, r *report.Report) error {
 	}
 
 	return os.WriteFile(filepath.Join(dir, "report.md"), []byte(r.Markdown()), 0o600)
-}
-
-func shortSHA(commit string) string {
-	if len(commit) > 12 {
-		return commit[:12]
-	}
-
-	return commit
 }
