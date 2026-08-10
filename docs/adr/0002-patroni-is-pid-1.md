@@ -86,7 +86,7 @@ eight container contracts:
 | Contract | What it asserts |
 |---|---|
 | `entrypoint-ends-with-exec-patroni` | The image entrypoint's last instruction is `exec patroni`; it contains no listed privilege wrapper, init, supervisor, loop, trap or background command; the image uses `STOPSIGNAL SIGTERM`, a digest-pinned base and final user `999:999`. |
-| `patroni-is-pid-1` | `/proc/1/comm` is `patroni`, the PID 1 command line names the rendered test configuration, and no listed init, supervisor or bare shell is present. |
+| `patroni-is-pid-1` | The PID 1 command line names the rendered test configuration, and no listed init, supervisor or bare shell is present. |
 | `pid-1-catches-sigterm` | The caught-signal mask includes SIGHUP, SIGINT, SIGTERM and SIGCHLD. |
 | `sigterm-shuts-postgres-down-gracefully` | SIGTERM stops the container with exit code 0 and the logs show both a fast-shutdown request and completed database shutdown. |
 | `container-exits-when-patroni-exits` | Killing Patroni's child stops the container, and no second high-availability loop starts. |
@@ -106,12 +106,20 @@ liveness probe against Patroni's `/liveness` endpoint.
   when it is sampled relative to Patroni's `setproctitle` call, so the recorded
   value is not architecture-independent even though the process topology is.
   The `/proc/1/cmdline` evidence identifies Patroni unambiguously on both.
+  The contract suite therefore no longer asserts `comm`: it is unreliable by
+  construction rather than flaky, because `exec patroni` runs a Python
+  interpreter and Patroni retitles itself afterwards. Identity is asserted on
+  `/proc/1/cmdline` instead.
 - When this record was written, the contract suite enforced only the last
   assertion of each test — 8 of 28 — because `fail` returned into a suppressed
   `errexit`. Every contract in the Enforcement table was therefore weaker than
   it reads, and the assertion that PID 1's `comm` is `patroni` was among those
   not enforced. The harness was fixed afterwards and now enforces every
-  assertion, with a self-test defending that property.
+  assertion, with a self-test defending that property. When enforcement was
+  fixed, none of the previously unenforced assertions turned out to be failing
+  on the architecture measured here. The assertions were holding, but a
+  regression in any of them would have gone unnoticed; at the time, there was
+  no way to know that they held.
 - The 288 samples establish single writability only at their sample times. The
   direct-Pod write oracle could not be built when the fault was injected, so
   there is no evidence about client acknowledgements and no basis for claiming
