@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/postgres-ai/cnpatroni-upstream/internal/baseline"
@@ -78,6 +79,8 @@ const (
 // because its exit code has to survive --exit-zero.
 const mergeDriverCommand = "merge-driver"
 
+const ownershipRatchetCommand = "ownership-ratchet"
+
 type globals struct {
 	repo         string
 	manifestPath string
@@ -111,9 +114,10 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	code := dispatch(rest[0], rest[1:], g, stdout, stderr)
 
 	// --exit-zero is for informational runs of the report and the validator.
-	// Letting it reach the merge driver would tell git that a boundary file
-	// merged cleanly, which is the one answer this tool must never give.
-	if g.exitZero && code != ExitUsage && rest[0] != mergeDriverCommand {
+	// Letting it reach either boundary gate would suppress the one answer that
+	// command must never give.
+	if g.exitZero && code != ExitUsage &&
+		rest[0] != mergeDriverCommand && rest[0] != ownershipRatchetCommand {
 		return ExitOK
 	}
 
@@ -130,6 +134,8 @@ func dispatch(command string, args []string, g globals, stdout, stderr io.Writer
 		return runReport(args, g, stdout, stderr)
 	case "gitattributes":
 		return runGitAttributes(args, g, stdout, stderr)
+	case ownershipRatchetCommand:
+		return runOwnershipRatchet(args, g, stdout, stderr)
 	case mergeDriverCommand:
 		return runMergeDriver(args, stderr)
 	case "version":
@@ -168,6 +174,8 @@ Commands:
   report     compute the divergence between the recorded baseline and upstream
   gitattributes
              render `+defaultAttributesPath+` from the boundary manifest
+  ownership-ratchet
+             compare protected ownership rules with a base manifest
   merge-driver
              git's always-conflict merge driver for a boundary path; git runs it,
              you do not
@@ -341,6 +349,95 @@ func printFindings(stdout io.Writer, manifestPath string, findings []boundary.Fi
 	if remedy := boundary.RemediationFor(manifestPath, findings); remedy != "" {
 		_, _ = fmt.Fprintf(stdout, "\n%s", remedy)
 	}
+}
+
+func runOwnershipRatchet(args []string, g globals, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet(ownershipRatchetCommand, flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	basePath := fs.String("base", "", "base boundary manifest")
+	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if *basePath == "" {
+		_, _ = fmt.Fprintln(stderr, "ownership-ratchet requires --base")
+
+		return ExitUsage
+	}
+	if fs.NArg() != 0 {
+		_, _ = fmt.Fprintf(stderr, "ownership-ratchet does not accept positional arguments: %s\n",
+			strings.Join(fs.Args(), " "))
+
+		return ExitUsage
+	}
+
+	repo, err := g.openRepo()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cannot open the repository for ownership-ratchet: %v\n", err)
+
+		return ExitUsage
+	}
+
+	base, err := boundary.Load(*basePath)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cannot load base boundary manifest %s: %v\n", *basePath, err)
+
+		return ExitManifestInvalid
+	}
+	if !ratchetManifestIsValid("base", base, stderr) {
+		return ExitManifestInvalid
+	}
+	currentPath := g.manifestFile(repo)
+	current, err := boundary.Load(currentPath)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cannot load current boundary manifest %s: %v\n", currentPath, err)
+
+		return ExitManifestInvalid
+	}
+	if !ratchetManifestIsValid("current", current, stderr) {
+		return ExitManifestInvalid
+	}
+
+	result := boundary.Ratchet(base, current)
+	for _, rename := range result.Renames {
+		_, _ = fmt.Fprintf(stdout, "Ownership rule rename: %s -> %s; class and paths preserved.\n",
+			rename.OldRule, rename.NewRule)
+	}
+	for _, allowance := range result.AppliedAllowances {
+		_, _ = fmt.Fprintf(stdout, "Acknowledged ownership narrowing: rule %s path %q: %s\n",
+			allowance.Rule, allowance.Path, allowance.Reason)
+	}
+	for _, allowance := range result.StaleAllowances {
+		_, _ = fmt.Fprintf(stdout, "Stale ownership ratchet allowance: rule %s path %q: %s\n",
+			allowance.Rule, allowance.Path, allowance.Reason)
+	}
+	for _, finding := range result.Findings {
+		_, _ = fmt.Fprintf(stderr, "Ownership ratchet finding: %s\n", finding)
+	}
+	if len(result.Findings) > 0 {
+		return ExitManifestInvalid
+	}
+
+	_, _ = fmt.Fprintf(stdout, "Compared %d protected rules: ownership boundary did not shrink.\n",
+		result.ProtectedRules)
+
+	return ExitOK
+}
+
+func ratchetManifestIsValid(name string, manifest *boundary.Manifest, stderr io.Writer) bool {
+	findings, err := boundary.Validate(manifest, boundary.Options{})
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cannot validate %s boundary manifest: %v\n", name, err)
+
+		return false
+	}
+	if len(findings) == 0 {
+		return true
+	}
+	for _, finding := range findings {
+		_, _ = fmt.Fprintf(stderr, "%s boundary manifest invalid: %s\n", name, finding)
+	}
+
+	return false
 }
 
 func runReport(args []string, g globals, stdout, stderr io.Writer) int {

@@ -73,6 +73,17 @@ dead-code roots to the scan-unit table in `hack/cnpatroni/check-code-hygiene.sh`
 should not be scanned, it instead needs an explicit coverage exclusion there with a written
 reason; there are currently no exclusions.
 
+The gate derives the files it must cover from the ownership classes in
+`hack/cnpatroni/upstream/boundary.yaml`, so it trusts that manifest. The
+`ownership-ratchet` step compares every `cnpatroni-owned` and `disabled` rule — its id,
+class and path patterns — with the manifest as it stood at the merge base. A rule may gain paths
+freely, but it may not lose paths, change class or disappear without an
+`ownership_ratchet_allow` entry carrying a reason; that acknowledgement appears in the same diff
+as the narrowing. Comparison is on literal patterns, so replacing several patterns with one
+broader pattern also needs an acknowledgement. The code-hygiene job must be a required status
+check on `main`, otherwise the ratchet is advisory. The fork-owned Go file count in the coverage
+cross-check's output is informational; it does not ratchet or guard coverage.
+
 Declared coverage is not proof that every analysis reads every counted file. A nested Go module
 inside a declared scan directory is prefix-matched as covered, but `go list ./...` in the parent
 module does not descend into it, so dead-code and orphan-package analysis skip it. Duplication

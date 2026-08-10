@@ -179,6 +179,105 @@ func TestCLIValidateEmitsJSON(t *testing.T) {
 	}
 }
 
+func writeRatchetBase(t *testing.T, body string) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "boundary-base.yaml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing ratchet base: %v", err)
+	}
+
+	return path
+}
+
+func TestCLIOwnershipRatchetRequiresBase(t *testing.T) {
+	e := newEnv(t, cliManifest)
+
+	code, _, stderr := e.run("ownership-ratchet")
+	if code != cli.ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitUsage)
+	}
+	if !strings.Contains(stderr, "--base") {
+		t.Errorf("stderr should name the required flag: %q", stderr)
+	}
+}
+
+func TestCLIOwnershipRatchetRejectsUnknownFlags(t *testing.T) {
+	e := newEnv(t, cliManifest)
+
+	code, _, _ := e.run("ownership-ratchet", "--unknown")
+	if code != cli.ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitUsage)
+	}
+}
+
+func TestCLIOwnershipRatchetReportsAnUnreadableBase(t *testing.T) {
+	e := newEnv(t, cliManifest)
+	path := filepath.Join(t.TempDir(), "absent-boundary.yaml")
+
+	code, _, stderr := e.run("ownership-ratchet", "--base", path)
+	if code != cli.ExitManifestInvalid {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitManifestInvalid)
+	}
+	if !strings.Contains(stderr, path) {
+		t.Errorf("stderr should name the unreadable base path: %q", stderr)
+	}
+}
+
+func TestCLIOwnershipRatchetRejectsATruncatedBase(t *testing.T) {
+	e := newEnv(t, cliManifest)
+	path := writeRatchetBase(t, "schema: cnpatroni.io/boundary/v1\n")
+
+	code, _, stderr := e.run("ownership-ratchet", "--base", path)
+	if code != cli.ExitManifestInvalid {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitManifestInvalid)
+	}
+	if !strings.Contains(stderr, "base boundary manifest") || !strings.Contains(stderr, "declares no rules") {
+		t.Errorf("stderr should identify the truncated base: %q", stderr)
+	}
+}
+
+func TestCLIOwnershipRatchetAcceptsAnIdenticalBase(t *testing.T) {
+	e := newEnv(t, cliManifest)
+	path := writeRatchetBase(t, cliManifest)
+
+	code, stdout, stderr := e.run("ownership-ratchet", "--base", path)
+	if code != cli.ExitOK {
+		t.Fatalf("exit = %d, want %d\nstdout: %s\nstderr: %s", code, cli.ExitOK, stdout, stderr)
+	}
+	if !strings.Contains(stdout, "2 protected rules") {
+		t.Errorf("stdout should confirm the compared rule count: %q", stdout)
+	}
+}
+
+func TestCLIOwnershipRatchetRejectsReclassification(t *testing.T) {
+	e := newEnv(t, strings.Replace(cliManifest, "ownership: cnpatroni-owned", "ownership: adapted", 1))
+	path := writeRatchetBase(t, cliManifest)
+
+	code, stdout, stderr := e.run("ownership-ratchet", "--base", path)
+	if code != cli.ExitManifestInvalid {
+		t.Fatalf("exit = %d, want %d\nstdout: %s\nstderr: %s", code, cli.ExitManifestInvalid, stdout, stderr)
+	}
+	if stdout != "" {
+		t.Errorf("findings belong on stderr, got stdout %q", stdout)
+	}
+	for _, want := range []string{"owned.tooling", "cnpatroni-owned", "adapted"} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr should name %q: %s", want, stderr)
+		}
+	}
+}
+
+func TestCLIOwnershipRatchetCannotBeSuppressedByExitZero(t *testing.T) {
+	e := newEnv(t, strings.Replace(cliManifest, "ownership: cnpatroni-owned", "ownership: adapted", 1))
+	path := writeRatchetBase(t, cliManifest)
+
+	code, _, _ := e.run("--exit-zero", "ownership-ratchet", "--base", path)
+	if code != cli.ExitManifestInvalid {
+		t.Fatalf("exit = %d, want %d despite --exit-zero", code, cli.ExitManifestInvalid)
+	}
+}
+
 func TestCLIExitZeroSuppressesTheExitCode(t *testing.T) {
 	e := newEnv(t, cliManifest)
 	e.git.Write("docs/src/faq.md", "# Frequently asked questions\n\nFork edit.\n")
@@ -469,7 +568,7 @@ func TestCLIUsageListsTheBoundaryGuardCommands(t *testing.T) {
 	e := newEnv(t, cliManifest)
 
 	_, stdout, _ := e.run("help")
-	for _, command := range []string{"gitattributes", "merge-driver"} {
+	for _, command := range []string{"gitattributes", "merge-driver", "ownership-ratchet"} {
 		if !strings.Contains(stdout, command) {
 			t.Errorf("usage should list %q:\n%s", command, stdout)
 		}
