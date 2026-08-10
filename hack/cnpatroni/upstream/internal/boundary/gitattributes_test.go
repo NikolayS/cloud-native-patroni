@@ -119,7 +119,7 @@ func TestGitAttributesHeaderRegistersTheDriverWithoutChangingDirectory(t *testin
 
 	var driverLine string
 	for _, line := range strings.Split(out, "\n") {
-		if strings.Contains(line, "merge-driver %O") {
+		if strings.Contains(line, "merge-driver") {
 			driverLine = line
 		}
 	}
@@ -129,7 +129,31 @@ func TestGitAttributesHeaderRegistersTheDriverWithoutChangingDirectory(t *testin
 	if strings.Contains(driverLine, "cd ") {
 		t.Errorf("the driver command changes directory, which breaks git's relative paths: %q", driverLine)
 	}
-	if !strings.Contains(driverLine, "%O %A %B %L %P") {
+	// The placeholders are single-quoted, because git hands the whole command
+	// to a shell; see TestGitAttributesHeaderQuotesTheDriverCommand.
+	if !strings.Contains(driverLine, "'%O' '%A' '%B' '%L' '%P'") {
 		t.Errorf("the driver command must take git's five placeholders: %q", driverLine)
+	}
+}
+
+func TestGitAttributesHeaderQuotesTheDriverCommand(t *testing.T) {
+	out := renderAttributes(t, manifestBody(false, validRules, ""))
+
+	var driverLine string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "merge-driver") {
+			driverLine = line
+		}
+	}
+	if driverLine == "" {
+		t.Fatalf("the header does not show how to register the driver:\n%s", out)
+	}
+	if !strings.Contains(driverLine, `"'$root/bin/cnpatroni-upstream' merge-driver`) {
+		t.Errorf("the published recipe leaves the driver path unquoted: %q", driverLine)
+	}
+	for _, placeholder := range []string{"%O", "%A", "%B", "%L", "%P"} {
+		if !strings.Contains(driverLine, "'"+placeholder+"'") {
+			t.Errorf("the published recipe leaves %s unquoted: %q", placeholder, driverLine)
+		}
 	}
 }
