@@ -67,11 +67,29 @@ jobs:
             base="$(git rev-parse "HEAD^")"
           fi
 
+          # The pull request that introduces the manifest has no merge-base copy
+          # to ratchet against, because the fork base is upstream's tree and
+          # upstream carries no manifest. Bootstrap only from the recorded fork
+          # base, so a missing manifest anywhere else still fails closed.
+          #
+          # The manifest is deliberately not pinned by blob the way the
+          # authority baseline is. The baseline must not move during bootstrap,
+          # but the manifest is edited throughout it by design, and a pin would
+          # have to be rewritten on every edit. A missing base manifest makes
+          # this comparison vacuous rather than weaker: there is no earlier
+          # ownership for the change to shrink.
           if ! git cat-file -e \
             "${base}:hack/cnpatroni/upstream/boundary.yaml" 2>/dev/null
           then
-            echo "The merge base has no ownership boundary manifest; the ratchet cannot run." >&2
-            exit 1
+            bootstrap_base="b22682115c5f3ad1bfe69bed719151d0db918e39"
+
+            if [[ "${base}" != "${bootstrap_base}" ]]; then
+              echo "The merge base has no ownership boundary manifest and is not the bootstrap base." >&2
+              exit 1
+            fi
+
+            echo "No merge-base manifest exists yet; there is no earlier ownership to ratchet against."
+            exit 0
           fi
 
           git show "${base}:hack/cnpatroni/upstream/boundary.yaml" \
