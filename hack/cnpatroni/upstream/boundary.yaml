@@ -72,10 +72,13 @@ rules:
       - .github/workflows/cnpatroni-*.yml
       - .github/workflows-upstream/README.md
       - docs/cnpatroni/**
+      - .gitattributes
     note: >-
       The upstream compatibility system, its scheduled job and the maintainer
       documentation. Upstream has no counterpart, so an upstream path arriving
-      here is a name collision, not a merge.
+      here is a name collision, not a merge. `.gitattributes` is generated from
+      this file by `cnpatroni-upstream gitattributes`; upstream CloudNativePG
+      has never carried one, so it is owned rather than adapted.
 
   - id: owned.project-metadata
     ownership: cnpatroni-owned

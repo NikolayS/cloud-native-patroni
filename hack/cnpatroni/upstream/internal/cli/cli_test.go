@@ -258,3 +258,195 @@ func TestCLIVersion(t *testing.T) {
 		t.Error("version must print something")
 	}
 }
+
+func TestCLIGitAttributesWritesTheGeneratedFile(t *testing.T) {
+	e := newEnv(t, cliManifest)
+
+	code, stdout, stderr := e.run("gitattributes")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+
+	body := readGenerated(t, filepath.Join(e.root, ".gitattributes"))
+	if !strings.HasPrefix(body, "# Generated from") {
+		t.Errorf("the generated file does not open with the generated-file header:\n%s", body)
+	}
+	if !strings.Contains(body, "internal/controller/replicas.go cnpatroni-boundary=disabled merge=cnpatroni-boundary") {
+		t.Errorf("the disabled path is not routed through the merge driver:\n%s", body)
+	}
+	if !strings.Contains(stderr, ".gitattributes") {
+		t.Errorf("stderr should name the file it wrote: %q", stderr)
+	}
+}
+
+func TestCLIGitAttributesStdoutLeavesTheFileAlone(t *testing.T) {
+	e := newEnv(t, cliManifest)
+
+	code, stdout, _ := e.run("gitattributes", "--stdout")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	if !strings.Contains(stdout, "cnpatroni-boundary=disabled") {
+		t.Errorf("--stdout should print the rendered file:\n%s", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(e.root, ".gitattributes")); err == nil {
+		t.Error("--stdout must not write the file")
+	}
+}
+
+func TestCLIGitAttributesCheckAcceptsAFreshFile(t *testing.T) {
+	e := newEnv(t, cliManifest)
+
+	if code, _, stderr := e.run("gitattributes"); code != 0 {
+		t.Fatalf("generating: exit = %d\n%s", code, stderr)
+	}
+	if code, _, stderr := e.run("gitattributes", "--check"); code != 0 {
+		t.Fatalf("--check on a freshly generated file: exit = %d\n%s", code, stderr)
+	}
+}
+
+// A stale generated file is the failure mode that matters: the manifest would
+// declare a boundary the merge driver is not actually guarding.
+func TestCLIGitAttributesCheckRejectsAStaleFile(t *testing.T) {
+	e := newEnv(t, cliManifest)
+	e.git.Write(".gitattributes", "# Generated from hack/cnpatroni/upstream/boundary.yaml. Do not edit by hand.\n")
+
+	code, _, stderr := e.run("gitattributes", "--check")
+	if code != cli.ExitManifestInvalid {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitManifestInvalid)
+	}
+	if !strings.Contains(stderr, "gitattributes") {
+		t.Errorf("stderr should name the command that regenerates the file: %q", stderr)
+	}
+}
+
+func TestCLIGitAttributesCheckRejectsAMissingFile(t *testing.T) {
+	e := newEnv(t, cliManifest)
+
+	code, _, stderr := e.run("gitattributes", "--check")
+	if code != cli.ExitManifestInvalid {
+		t.Fatalf("exit = %d, want %d\n%s", code, cli.ExitManifestInvalid, stderr)
+	}
+}
+
+func TestCLIGitAttributesFailsOnAMalformedManifest(t *testing.T) {
+	e := newEnv(t, strings.Replace(cliManifest, "cnpatroni.io/boundary/v1", "cnpatroni.io/boundary/v2", 1))
+
+	// The schema is checked by validate, not by the parser, so the generator
+	// must still refuse a manifest it cannot read at all.
+	e.git.Write("hack/cnpatroni/upstream/boundary.yaml", "rules: [\n")
+
+	code, _, _ := e.run("gitattributes")
+	if code != cli.ExitManifestInvalid {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitManifestInvalid)
+	}
+}
+
+func TestCLIGitAttributesRejectsAnUnknownFlag(t *testing.T) {
+	e := newEnv(t, cliManifest)
+
+	if code, _, _ := e.run("gitattributes", "--frobnicate"); code != cli.ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitUsage)
+	}
+}
+
+// mergeDriverArgs writes the three temporary files git hands a merge driver and
+// returns the command line git would run.
+func mergeDriverArgs(t *testing.T, ancestor, ours, theirs string) []string {
+	t.Helper()
+
+	dir := t.TempDir()
+	write := func(name, body string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+
+		return path
+	}
+
+	return []string{
+		"merge-driver",
+		write("ancestor", ancestor), write("ours", ours), write("theirs", theirs),
+		"7", "pkg/management/postgres/instance.go",
+	}
+}
+
+func readGenerated(t *testing.T, path string) string {
+	t.Helper()
+
+	body, err := os.ReadFile(path) //nolint:gosec // the path is a test temporary file
+	if err != nil {
+		t.Fatalf("ReadFile(%q): %v", path, err)
+	}
+
+	return string(body)
+}
+
+// The inputs are the silent-automerge shape: each side changes a different end
+// of the file, so git resolves it without a conflict and says nothing.
+func TestCLIMergeDriverAlwaysReportsAConflict(t *testing.T) {
+	e := newEnv(t, cliManifest)
+	args := mergeDriverArgs(t,
+		"one\ntwo\nthree\nfour\nfive\n",
+		"ONE\ntwo\nthree\nfour\nfive\n",
+		"one\ntwo\nthree\nfour\nFIVE\n")
+
+	code, _, stderr := e.run(args...)
+	if code == 0 {
+		t.Fatal("the merge driver must never report success to git")
+	}
+	if code != cli.ExitConflict {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitConflict)
+	}
+	if !strings.Contains(stderr, "pkg/management/postgres/instance.go") {
+		t.Errorf("stderr should name the boundary path: %q", stderr)
+	}
+	if !strings.Contains(stderr, "fork-maintenance.md") {
+		t.Errorf("stderr should say why the merge was stopped: %q", stderr)
+	}
+}
+
+// --exit-zero is meant for informational report runs. Letting it reach the
+// merge driver would tell git that a boundary file merged cleanly.
+func TestCLIMergeDriverIgnoresExitZero(t *testing.T) {
+	e := newEnv(t, cliManifest)
+	args := append([]string{"--exit-zero"}, mergeDriverArgs(t, "a\n", "b\n", "c\n")...)
+
+	if code, _, _ := e.run(args...); code == 0 {
+		t.Fatal("--exit-zero must not be able to zero the merge driver's exit code")
+	}
+}
+
+func TestCLIMergeDriverRejectsTooFewArguments(t *testing.T) {
+	e := newEnv(t, cliManifest)
+
+	code, _, stderr := e.run("merge-driver", "one", "two")
+	if code != cli.ExitUsage {
+		t.Fatalf("exit = %d, want %d", code, cli.ExitUsage)
+	}
+	if !strings.Contains(stderr, "%O") {
+		t.Errorf("stderr should show the placeholders git must pass: %q", stderr)
+	}
+}
+
+func TestCLIMergeDriverReportsAnUnreadableInput(t *testing.T) {
+	e := newEnv(t, cliManifest)
+	args := mergeDriverArgs(t, "a\n", "b\n", "c\n")
+	args[3] = filepath.Join(t.TempDir(), "absent")
+
+	if code, _, _ := e.run(args...); code == 0 {
+		t.Fatal("a driver that could not merge must never report success")
+	}
+}
+
+func TestCLIUsageListsTheBoundaryGuardCommands(t *testing.T) {
+	e := newEnv(t, cliManifest)
+
+	_, stdout, _ := e.run("help")
+	for _, command := range []string{"gitattributes", "merge-driver"} {
+		if !strings.Contains(stdout, command) {
+			t.Errorf("usage should list %q:\n%s", command, stdout)
+		}
+	}
+}

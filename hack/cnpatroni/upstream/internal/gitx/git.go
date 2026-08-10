@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -115,6 +116,28 @@ func run(dir string, args ...string) (string, int, error) {
 	}
 
 	return string(out), 0, nil
+}
+
+// CommonDir returns the absolute path of the repository's shared git
+// directory. It is where a per-clone artefact belongs: the directory is outside
+// the worktree, so nothing written there can dirty a merge or show up in
+// `git status`.
+func (r *Repo) CommonDir() (string, error) {
+	out, err := r.Run("rev-parse", "--git-common-dir")
+	if err != nil {
+		return "", err
+	}
+
+	dir := strings.TrimSpace(out)
+	if dir == "" {
+		return "", fmt.Errorf("git did not report a git directory for %q", r.Root)
+	}
+	if !filepath.IsAbs(dir) {
+		// git reports the path relative to the directory it ran in.
+		dir = filepath.Join(r.Root, dir)
+	}
+
+	return dir, nil
 }
 
 // IsShallow reports whether the repository has a truncated history.

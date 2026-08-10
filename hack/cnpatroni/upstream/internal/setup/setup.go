@@ -20,20 +20,32 @@ SPDX-License-Identifier: Apache-2.0
 // Package setup makes a fresh clone of the CloudNativePatroni fork able to
 // answer questions about upstream CloudNativePG.
 //
-// Every step is additive: it configures a remote, fetches objects and refs, and
-// backfills a truncated history. Nothing here rewrites a commit, moves a
+// Every step is additive: it configures a remote, fetches objects and refs,
+// backfills a truncated history, and registers the boundary merge driver that
+// the generated .gitattributes names. Nothing here rewrites a commit, moves a
 // branch, pushes, or touches the worktree, so it is safe to run repeatedly and
 // safe to run on a clone with uncommitted work in it.
 package setup
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
+	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
 	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
 )
+
+// driverBinaryName is the file the merge driver is installed as, inside the
+// repository's git directory.
+const driverBinaryName = "cnpatroni-upstream"
+
+// driverDescription is what `git config merge.<driver>.name` reports, which is
+// the text git prints when it cannot find the driver.
+const driverDescription = "CloudNativePatroni boundary guard"
 
 // Options configures the setup run.
 type Options struct {
@@ -44,6 +56,12 @@ type Options struct {
 	Remote string
 	// Track is the upstream branch this fork follows.
 	Track string
+	// DriverBinary is the executable registered as the boundary merge driver.
+	// It defaults to the running executable, which setup installs into the
+	// repository's git directory: a `go run` binary is deleted as soon as the
+	// command exits, so registering its path directly would leave git pointing
+	// at nothing.
+	DriverBinary string
 	// DryRun prints the steps without running them.
 	DryRun bool
 	// Out receives the human-readable transcript. Defaults to os.Stdout.
@@ -95,6 +113,9 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 	if err := runner.configureRerere(); err != nil {
+		return nil, err
+	}
+	if err := runner.configureMergeDriver(); err != nil {
 		return nil, err
 	}
 
@@ -218,6 +239,164 @@ func (r *runner) configureRerere() error {
 	}
 
 	return nil
+}
+
+// configureMergeDriver registers the always-conflict merge driver that the
+// generated .gitattributes names. Git refuses to take a driver definition from
+// a tracked file, so this registration is the whole difference between a guard
+// and an inert attribute: without it git falls back to its ordinary three-way
+// merge and absorbs an upstream change to a boundary file silently, which is
+// the failure docs/cnpatroni/fork-maintenance.md records.
+func (r *runner) configureMergeDriver() error {
+	source, err := r.driverSource()
+	if err != nil {
+		return err
+	}
+
+	commonDir, err := r.opts.Repo.CommonDir()
+	if err != nil {
+		return err
+	}
+
+	// The git directory, not the worktree: an executable under bin/ would show
+	// up as an untracked file in every merge this guard is supposed to police.
+	destination := filepath.Join(commonDir, "cnpatroni", driverBinaryName)
+	if err := r.installDriver(source, destination); err != nil {
+		return err
+	}
+
+	settings := []struct {
+		key, value string
+	}{
+		{"merge." + boundary.MergeDriverName + ".name", driverDescription},
+		{"merge." + boundary.MergeDriverName + ".driver", destination + " merge-driver %O %A %B %L %P"},
+	}
+
+	for _, s := range settings {
+		name := "register the boundary merge driver (" + s.key + ")"
+		current, _, _ := r.opts.Repo.RunAllowFail("config", "--get", s.key)
+		if strings.TrimSpace(current) == s.value {
+			r.skip(name, []string{"config", s.key, s.value}, "already set")
+
+			continue
+		}
+		if err := r.step(name, []string{"config", s.key, s.value}); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+// driverSource resolves the executable to register, and refuses a path that is
+// not there: a registration pointing at a missing binary is worse than none,
+// because git would then fail every boundary merge for the wrong reason.
+func (r *runner) driverSource() (string, error) {
+	path := r.opts.DriverBinary
+	if path == "" {
+		self, err := os.Executable()
+		if err != nil {
+			return "", fmt.Errorf("cannot locate this executable to register it as the merge driver: %w", err)
+		}
+		path = self
+	}
+
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("cannot resolve the merge driver binary %q: %w", path, err)
+	}
+	info, err := os.Stat(absolute)
+	if err != nil {
+		return "", fmt.Errorf("cannot register the boundary merge driver: %w", err)
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("the merge driver binary %q is a directory", absolute)
+	}
+
+	return absolute, nil
+}
+
+func (r *runner) installDriver(source, destination string) error {
+	same, err := sameContent(source, destination)
+	if err != nil {
+		return err
+	}
+	command := []string{"install", source, destination}
+	if same {
+		r.skip("install the boundary merge driver", command, "already installed")
+
+		return nil
+	}
+
+	return r.localStep("install the boundary merge driver", command, func() error {
+		return installExecutable(source, destination)
+	})
+}
+
+// localStep records a step that configures the clone without invoking git.
+func (r *runner) localStep(name string, command []string, apply func() error) error {
+	step := Step{Name: name, Command: command}
+
+	if r.opts.DryRun {
+		step.Skipped = true
+		step.Reason = "dry run"
+		r.record(step)
+
+		return nil
+	}
+
+	if err := apply(); err != nil {
+		r.record(step)
+
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	r.record(step)
+
+	return nil
+}
+
+// installExecutable copies the binary through a temporary file in the target
+// directory, so that a merge running while setup runs never sees a truncated
+// driver.
+func installExecutable(source, destination string) error {
+	body, err := os.ReadFile(source) //nolint:gosec // the operator names the binary to install
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o750); err != nil {
+		return err
+	}
+
+	temporary := destination + ".new"
+	if err := os.WriteFile(temporary, body, 0o700); err != nil { //nolint:gosec // it has to be executable
+		return err
+	}
+	if err := os.Rename(temporary, destination); err != nil {
+		_ = os.Remove(temporary)
+
+		return err
+	}
+
+	return nil
+}
+
+// sameContent reports whether the driver is already installed unchanged. A
+// missing destination is not an error: it is the first run.
+func sameContent(source, destination string) (bool, error) {
+	installed, err := os.ReadFile(destination) //nolint:gosec // a path this package computed
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+
+		return false, err
+	}
+	current, err := os.ReadFile(source) //nolint:gosec // the operator names the binary to install
+	if err != nil {
+		return false, err
+	}
+
+	return bytes.Equal(installed, current), nil
 }
 
 func (r *runner) step(name string, args []string) error {

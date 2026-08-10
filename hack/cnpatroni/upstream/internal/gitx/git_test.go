@@ -278,3 +278,33 @@ func TestGrepFilesAtScansASpecificRef(t *testing.T) {
 		t.Fatalf("matches = %v, want [ha.go]", matches)
 	}
 }
+
+// The shared git directory is where per-clone artefacts belong: it is outside
+// the worktree, so writing there cannot dirty a merge.
+func TestCommonDirIsAbsoluteAndOutsideTheWorktree(t *testing.T) {
+	f := gittest.New(t)
+	f.Write("a.go", "package a\n")
+	f.Commit("base")
+
+	dir, err := f.Repo(t).CommonDir()
+	if err != nil {
+		t.Fatalf("CommonDir: %v", err)
+	}
+	if !filepath.IsAbs(dir) {
+		t.Errorf("CommonDir returned the relative path %q", dir)
+	}
+	if info, statErr := os.Stat(dir); statErr != nil || !info.IsDir() {
+		t.Fatalf("CommonDir returned %q, which is not a directory: %v", dir, statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(dir, "HEAD")); statErr != nil {
+		t.Errorf("CommonDir returned %q, which does not hold HEAD: %v", dir, statErr)
+	}
+}
+
+func TestCommonDirRejectsANonRepository(t *testing.T) {
+	repo := &gitx.Repo{Root: t.TempDir()}
+
+	if _, err := repo.CommonDir(); err == nil {
+		t.Fatal("expected an error outside a repository, got none")
+	}
+}

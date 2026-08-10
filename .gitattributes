@@ -1,0 +1,196 @@
+# Generated from hack/cnpatroni/upstream/boundary.yaml. Do not edit by hand.
+#
+# Regenerate with:
+#   (cd hack/cnpatroni/upstream && go run ./cmd/cnpatroni-upstream gitattributes)
+#
+# The merge driver named here has to be registered once per clone, because git
+# refuses to take a driver definition from a tracked file:
+#   root=$(git rev-parse --show-toplevel)
+#   go build -C hack/cnpatroni/upstream \
+#     -o "$root/bin/cnpatroni-upstream" ./cmd/cnpatroni-upstream
+#   git config merge.cnpatroni-boundary.name "CloudNativePatroni boundary guard"
+#   git config merge.cnpatroni-boundary.driver \
+#     "$root/bin/cnpatroni-upstream merge-driver %O %A %B %L %P"
+#
+# The driver command must be an absolute path and must not change directory:
+# git substitutes %O %A %B with temporary file names that are relative to the
+# repository root, so a driver that cds elsewhere cannot open them.
+#
+# Without that registration git falls back to its ordinary three-way merge and
+# the guard is inert, which is why it is one of three independent mechanisms
+# rather than the only one.
+
+# owned.upstream-tooling
+hack/cnpatroni/** cnpatroni-boundary=cnpatroni-owned
+.github/workflows/cnpatroni-*.yml cnpatroni-boundary=cnpatroni-owned
+.github/workflows-upstream/README.md cnpatroni-boundary=cnpatroni-owned
+docs/cnpatroni/** cnpatroni-boundary=cnpatroni-owned
+.gitattributes cnpatroni-boundary=cnpatroni-owned
+
+# owned.project-metadata
+CLAUDE.md cnpatroni-boundary=cnpatroni-owned
+NOTICE cnpatroni-boundary=cnpatroni-owned
+
+# owned.runtime-guard
+internal/cnpatroni/guard/** cnpatroni-boundary=cnpatroni-owned
+
+# owned.decision-records
+docs/adr/** cnpatroni-boundary=cnpatroni-owned
+
+# owned.patroni-packages
+internal/patroni/** cnpatroni-boundary=cnpatroni-owned
+internal/controller/patroni/** cnpatroni-boundary=cnpatroni-owned
+cmd/cnpatroni-agent/** cnpatroni-boundary=cnpatroni-owned
+pkg/patroni/** cnpatroni-boundary=cnpatroni-owned
+tests/chaos/** cnpatroni-boundary=cnpatroni-owned
+brand/** cnpatroni-boundary=cnpatroni-owned
+
+# disable.pid1-supervisor
+internal/cmd/manager/instance/run/lifecycle/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/manager/instance/run/lease/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+
+# disable.election-engine
+internal/controller/primary_lease.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/controller/replicas.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/controller/replicas_quorum.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/controller/cluster_restore.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/controller/cluster_upgrade.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+
+# disable.instance-role-transitions
+internal/management/controller/instance_sync.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/management/controller/instance_token.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/management/controller/slots/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+
+# disable.process-primitives
+pkg/management/postgres/promote.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/management/postgres/join.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/management/postgres/instance_replica.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/management/postgres/pidfile.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/postgres/replication/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/promotiontoken/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/utils/fencing.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+
+# disable.isolation-self-fence
+pkg/management/postgres/webserver/probes/liveness.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/management/postgres/webserver/probes/pinger.go cnpatroni-boundary=disabled merge=cnpatroni-boundary
+
+# disable.bootstrap-jobs
+internal/cmd/manager/instance/join/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/manager/instance/restore/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/manager/instance/restoresnapshot/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/manager/instance/pgbasebackup/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/manager/instance/initdb/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/manager/instance/upgrade/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/management/upgrade/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+
+# disable.pod-lifecycle-reconcilers
+pkg/reconciler/replicaclusterswitch/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/reconciler/majorupgrade/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+pkg/reconciler/hibernation/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+
+# disable.plugin-ha-commands
+internal/cmd/plugin/promote/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/plugin/restart/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/plugin/fence/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/plugin/hibernate/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+internal/cmd/plugin/maintenance/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
+
+# disable.upstream-workflows
+.github/workflows/backport.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/chatops.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/require-labels.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/pr_verify_linked_issue.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/release-tag.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/release-pr.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/release-publish.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/sync-api.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/sync-docs.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/osps_security_assessment.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/ossf_scorecard.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/snyk.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/k8s-versions-check.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/latest-postgres-version-check.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+.github/workflows/close-inactive-issues.yml cnpatroni-boundary=disabled merge=cnpatroni-boundary
+
+# adapt.instance-manager
+internal/cmd/manager/instance/run/cmd.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/management/controller/instance_controller.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/management/controller/instance_startup.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/management/controller/common.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/management/controller/manager.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/management/controller/database_controller.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/management/controller/databaserole_controller.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/management/controller/publication_controller.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/management/controller/subscription_controller.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/cmd/manager/walrestore/cmd.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/cmd/manager/walarchive/cmd.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+
+# adapt.process-primitives
+pkg/management/postgres/instance.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/configuration.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/restore.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/initdb.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/probes.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/archiver/archiver.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/webserver/remote.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/webserver/local.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/webserver/client/remote/instance.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/webserver/metricserver/pg_collector.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/webserver/probes/checker.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/management/postgres/webserver/probes/streaming.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+
+# adapt.operator-observation
+internal/controller/cluster_status.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/controller/cluster_controller.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/controller/cluster_create.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/controller/cluster_unrecoverable.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/controller/backup_controller.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/postgres/status.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/postgres/configuration.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/reconciler/backup/volumesnapshot/offline.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+
+# adapt.pod-and-service-specs
+pkg/specs/pods.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/specs/services.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/specs/roles.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/specs/jobs.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/reconciler/instance/metadata.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/reconciler/persistentvolumeclaim/metadata.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+
+# adapt.api-and-validation
+api/v1/cluster_types.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+api/v1/cluster_funcs.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/webhook/v1/cluster_webhook.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/utils/parser.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/cmd/plugin/status/status.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+internal/plugin/resources/instance.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+
+# adapt.branding-and-build
+README.md cnpatroni-boundary=adapted merge=cnpatroni-boundary
+Makefile cnpatroni-boundary=adapted merge=cnpatroni-boundary
+Dockerfile cnpatroni-boundary=adapted merge=cnpatroni-boundary
+docker-bake.hcl cnpatroni-boundary=adapted merge=cnpatroni-boundary
+.goreleaser.yml cnpatroni-boundary=adapted merge=cnpatroni-boundary
+.spellcheck.yaml cnpatroni-boundary=adapted merge=cnpatroni-boundary
+.wordlist-en-custom.txt cnpatroni-boundary=adapted merge=cnpatroni-boundary
+.wokeignore cnpatroni-boundary=adapted merge=cnpatroni-boundary
+DEPENDENCIES.md cnpatroni-boundary=adapted merge=cnpatroni-boundary
+.github/workflows/continuous-integration.yml cnpatroni-boundary=adapted merge=cnpatroni-boundary
+.github/workflows/continuous-delivery.yml cnpatroni-boundary=adapted merge=cnpatroni-boundary
+.github/workflows/registry-clean.yml cnpatroni-boundary=adapted merge=cnpatroni-boundary
+.github/workflows/refresh-licenses.yml cnpatroni-boundary=adapted merge=cnpatroni-boundary
+pkg/versions/versions.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+
+# adapt.project-governance
+CODE_OF_CONDUCT.md cnpatroni-boundary=adapted merge=cnpatroni-boundary
+CONTRIBUTING.md cnpatroni-boundary=adapted merge=cnpatroni-boundary
+GOVERNANCE.md cnpatroni-boundary=adapted merge=cnpatroni-boundary
+MAINTAINERS.md cnpatroni-boundary=adapted merge=cnpatroni-boundary
+ROADMAP.md cnpatroni-boundary=adapted merge=cnpatroni-boundary
+SECURITY.md cnpatroni-boundary=adapted merge=cnpatroni-boundary
+SUPPORT.md cnpatroni-boundary=adapted merge=cnpatroni-boundary
+
+# delete.upstream-project-metadata
+ADOPTERS.md cnpatroni-boundary=deleted merge=cnpatroni-boundary
+CODEOWNERS cnpatroni-boundary=deleted merge=cnpatroni-boundary
+SECURITY-INSIGHTS.yml cnpatroni-boundary=deleted merge=cnpatroni-boundary

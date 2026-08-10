@@ -29,6 +29,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/postgres-ai/cnpatroni-upstream/internal/baseline"
@@ -68,7 +69,14 @@ const (
 	defaultManifestPath = "hack/cnpatroni/upstream/boundary.yaml"
 	defaultBaselinePath = "hack/cnpatroni/upstream/upstream-baseline.yaml"
 	defaultReportDir    = "docs/cnpatroni/upstream-integration"
+	// defaultAttributesPath is the only place git honours a repository-wide
+	// attribute for every path the manifest declares.
+	defaultAttributesPath = ".gitattributes"
 )
+
+// mergeDriverCommand is the subcommand git itself runs. It is named here
+// because its exit code has to survive --exit-zero.
+const mergeDriverCommand = "merge-driver"
 
 type globals struct {
 	repo         string
@@ -101,7 +109,11 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	code := dispatch(rest[0], rest[1:], g, stdout, stderr)
-	if g.exitZero && code != ExitUsage {
+
+	// --exit-zero is for informational runs of the report and the validator.
+	// Letting it reach the merge driver would tell git that a boundary file
+	// merged cleanly, which is the one answer this tool must never give.
+	if g.exitZero && code != ExitUsage && rest[0] != mergeDriverCommand {
 		return ExitOK
 	}
 
@@ -116,6 +128,10 @@ func dispatch(command string, args []string, g globals, stdout, stderr io.Writer
 		return runValidate(args, g, stdout, stderr)
 	case "report":
 		return runReport(args, g, stdout, stderr)
+	case "gitattributes":
+		return runGitAttributes(args, g, stdout, stderr)
+	case mergeDriverCommand:
+		return runMergeDriver(args, stderr)
 	case "version":
 		_, _ = fmt.Fprintf(stdout, "cnpatroni-upstream %s\n", Version)
 
@@ -146,9 +162,15 @@ Global flags:
   --exit-zero  always exit 0; findings are still printed
 
 Commands:
-  setup      configure this clone: add the upstream remote, fetch tags, unshallow
+  setup      configure this clone: add the upstream remote, fetch tags, unshallow,
+             register the boundary merge driver
   validate   check the boundary manifest against the worktree and the history
   report     compute the divergence between the recorded baseline and upstream
+  gitattributes
+             render `+defaultAttributesPath+` from the boundary manifest
+  merge-driver
+             git's always-conflict merge driver for a boundary path; git runs it,
+             you do not
   version    print the tool version
 
 Exit codes:
@@ -407,6 +429,136 @@ func writeReport(dir string, r *report.Report) error {
 	}
 
 	return os.WriteFile(filepath.Join(dir, "report.md"), []byte(r.Markdown()), 0o600)
+}
+
+// regenerateHint is printed whenever the checked-in attributes and the manifest
+// disagree, because a stale file guards a boundary that has moved.
+const regenerateHint = "Regenerate it with:\n" +
+	"  (cd hack/cnpatroni/upstream && go run ./cmd/cnpatroni-upstream gitattributes)\n"
+
+const mergeDriverUsage = `cnpatroni-upstream merge-driver %O %A %B %L %P
+
+Git runs this; you do not. It is registered by ` + "`cnpatroni-upstream setup`" + ` as
+merge.` + boundary.MergeDriverName + `.driver, and it always reports the merge of a
+boundary path as unresolved.
+`
+
+// runGitAttributes renders the .gitattributes the manifest implies. It is the
+// only generated artefact of the boundary system, so it carries the generator's
+// own header rather than being editable by hand.
+func runGitAttributes(args []string, g globals, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("gitattributes", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	check := fs.Bool("check", false, "do not write; fail when the checked-in file is not what the manifest implies")
+	toStdout := fs.Bool("stdout", false, "print the rendered file instead of writing it")
+	out := fs.String("out", "", "file to write (default: "+defaultAttributesPath+" at the repository root)")
+	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+
+	repo, err := g.openRepo()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+
+		return ExitUsage
+	}
+
+	manifestPath := g.manifestFile(repo)
+	m, err := boundary.Load(manifestPath)
+	if err != nil {
+		return classify(err, stderr)
+	}
+
+	body := boundary.GitAttributes(m)
+	if *toStdout {
+		_, _ = fmt.Fprint(stdout, body)
+
+		return ExitOK
+	}
+
+	path := *out
+	if path == "" {
+		path = filepath.Join(repo.Root, defaultAttributesPath)
+	}
+
+	if *check {
+		return checkGitAttributes(path, manifestPath, body, stdout, stderr)
+	}
+
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+
+		return ExitManifestInvalid
+	}
+	_, _ = fmt.Fprintf(stderr, "Wrote %s\n", path)
+
+	return ExitOK
+}
+
+func checkGitAttributes(path, manifestPath, body string, stdout, stderr io.Writer) int {
+	current, err := os.ReadFile(path) //nolint:gosec // the path is operator-supplied by design
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "cannot read %s: %v\n\n%s", path, err, regenerateHint)
+
+		return ExitManifestInvalid
+	}
+	if string(current) != body {
+		_, _ = fmt.Fprintf(stderr, "%s is not what %s implies\n\n%s", path, manifestPath, regenerateHint)
+
+		return ExitManifestInvalid
+	}
+	_, _ = fmt.Fprintf(stdout, "%s: up to date\n", path)
+
+	return ExitOK
+}
+
+// runMergeDriver is git's merge driver for a boundary path. It reports a
+// conflict whatever happens, so its exit code is never ExitOK.
+func runMergeDriver(args []string, stderr io.Writer) int {
+	// %P was added to git's placeholder set later than the other four, so it is
+	// accepted but not required.
+	if len(args) < 4 || len(args) > 5 {
+		_, _ = fmt.Fprint(stderr, mergeDriverUsage)
+
+		return ExitUsage
+	}
+
+	in := boundary.MergeInputs{Ancestor: args[0], Ours: args[1], Theirs: args[2]}
+	// An unparsable %L falls back to git's own marker size inside the driver.
+	in.MarkerSize, _ = strconv.Atoi(args[3])
+	if len(args) == 5 {
+		in.Path = args[4]
+	}
+
+	clean, err := boundary.MergeDriver(in)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%s: %v\n", boundary.MergeDriverName, err)
+
+		return ExitConflict
+	}
+	_, _ = fmt.Fprint(stderr, mergeDriverMessage(in.Path, clean))
+
+	return ExitConflict
+}
+
+func mergeDriverMessage(path string, clean bool) string {
+	if path == "" {
+		path = "this boundary path"
+	}
+
+	reason := "git's own three-way merge left conflict markers in the file."
+	if clean {
+		reason = "git's own three-way merge resolved this file without a conflict, " +
+			"which is the silent absorption docs/cnpatroni/fork-maintenance.md records. " +
+			"The merged text is in the worktree; nothing was lost."
+	}
+
+	return fmt.Sprintf("%s: %s is a boundary path, so this merge is not resolved automatically.\n"+
+		"%s\n"+
+		"Read the upstream hunks before resolving:\n"+
+		"  git diff --merge-base HEAD MERGE_HEAD -- %s\n"+
+		"Then resolve the file and run `git add %s`.\n",
+		boundary.MergeDriverName, path, reason, path, path)
 }
 
 func shortSHA(commit string) string {

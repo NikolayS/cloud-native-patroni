@@ -3,10 +3,11 @@
 # Two jobs:
 #
 #   boundary-guard      runs on every pull request and push. It validates the
-#                       boundary manifest against the worktree and fails when
-#                       this fork has changed a file it never declared. Mark it
-#                       a required status check; without that the whole system
-#                       is advisory.
+#                       boundary manifest against the worktree, fails when this
+#                       fork has changed a file it never declared, and fails
+#                       when the generated .gitattributes no longer matches the
+#                       manifest. Mark it a required status check; without that
+#                       the whole system is advisory.
 #
 #   divergence-report   runs weekly and on demand. It computes what upstream
 #                       has changed since the recorded baseline, intersects it
@@ -81,6 +82,11 @@ jobs:
         run: |
           cd "${TOOL_DIR}"
           go run ./cmd/cnpatroni-upstream --repo "${GITHUB_WORKSPACE}" validate --drift
+      -
+        name: Check the generated .gitattributes against the manifest
+        run: |
+          cd "${TOOL_DIR}"
+          go run ./cmd/cnpatroni-upstream --repo "${GITHUB_WORKSPACE}" gitattributes --check
 
   # The watch on upstream's changes.
   divergence-report:

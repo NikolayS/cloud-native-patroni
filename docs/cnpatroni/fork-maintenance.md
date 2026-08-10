@@ -27,13 +27,14 @@ So the fork keeps a machine-readable declaration of what it does with every
 path, and refuses to let an upstream change to a declared path pass without a
 human reading it.
 
-## The three artefacts
+## The artefacts
 
 | Artefact | Path | What it is |
 |---|---|---|
 | Boundary manifest | `hack/cnpatroni/upstream/boundary.yaml` | Which paths CloudNativePatroni adapts, disables, deletes or owns |
 | Baseline record | `hack/cnpatroni/upstream/upstream-baseline.yaml` | Which upstream commit the fork started from, and which one it has integrated up to |
-| Tool | `hack/cnpatroni/upstream/` | A separate Go module: `setup`, `validate`, `report` |
+| Tool | `hack/cnpatroni/upstream/` | A separate Go module: `setup`, `validate`, `report`, `gitattributes`, `merge-driver` |
+| Generated attributes | `.gitattributes` | Generated from the manifest; routes every boundary path through the always-conflict merge driver |
 
 The manifest and the baseline live beside the tool rather than in a top-level
 dot-directory, so that one directory holds the whole system and the operator's
@@ -84,11 +85,14 @@ go run ./cmd/cnpatroni-upstream setup             # apply them
 refspec, so that upstream's development branches are not mirrored; disables
 automatic tag following; fetches the tracked branches, backfilling a truncated
 history with `git fetch --unshallow` when the clone is shallow; fetches the
-upstream version tags explicitly; and enables `git rerere` without
-`rerere.autoUpdate`, so a remembered conflict resolution is still shown to you.
+upstream version tags explicitly; enables `git rerere` without
+`rerere.autoUpdate`, so a remembered conflict resolution is still shown to you;
+and registers the boundary merge driver described below.
 
 It never rewrites a commit, never moves a branch, never pushes and never touches
-the worktree. Run it again whenever you want; a second run reports every
+the worktree. The merge driver it installs goes into the clone's git directory,
+not into `bin/`, so it cannot show up as an untracked file in the merges it is
+meant to police. Run setup again whenever you want; a second run reports every
 configuration step as skipped.
 
 The equivalent commands, if you would rather run them by hand:
@@ -102,7 +106,16 @@ git fetch --unshallow --no-tags upstream    # drop --unshallow on a complete clo
 git fetch upstream 'refs/tags/v*:refs/tags/v*'
 git config rerere.enabled true
 git config rerere.autoUpdate false
+
+driver="$(git rev-parse --path-format=absolute --git-common-dir)/cnpatroni/cnpatroni-upstream"
+go build -C hack/cnpatroni/upstream -o "$driver" ./cmd/cnpatroni-upstream
+git config merge.cnpatroni-boundary.name "CloudNativePatroni boundary guard"
+git config merge.cnpatroni-boundary.driver "$driver merge-driver %O %A %B %L %P"
 ```
+
+The driver command has to be an absolute path and must not change directory:
+git substitutes `%O %A %B` with temporary file names relative to the repository
+root, so a driver wrapped in a `cd` cannot open them.
 
 In CI, check out with `fetch-depth: 0` and then run `setup`; a shallow checkout
 cannot answer the drift question and the tool will say so rather than reporting
@@ -113,10 +126,12 @@ a clean result.
 ```text
 cnpatroni-upstream [--repo DIR] [--manifest FILE] [--baseline FILE] [--exit-zero] <command>
 
-  setup      configure this clone
-  validate   check the manifest against the worktree and the history
-  report     compute the divergence from upstream
-  version    print the tool version
+  setup          configure this clone
+  validate       check the manifest against the worktree and the history
+  report         compute the divergence from upstream
+  gitattributes  render .gitattributes from the boundary manifest
+  merge-driver   git's always-conflict driver for a boundary path; git runs it, you do not
+  version        print the tool version
 ```
 
 Exit codes are shared across the commands:
@@ -132,6 +147,9 @@ Exit codes are shared across the commands:
 | 6 | The clone is not set up: it is shallow, or the upstream remote is missing |
 
 `--exit-zero` forces 0 while still printing everything, for informational runs.
+`merge-driver` is the exception: it always exits 2, and `--exit-zero` cannot
+suppress that, because a zeroed exit code would tell git that a boundary file
+merged cleanly.
 
 ### validate
 
@@ -198,6 +216,104 @@ The fields worth reading first:
 - `manifest_stability.declared_but_missing_upstream` — a rule that has stopped
   classifying anything because upstream deleted the file.
 
+## The boundary merge driver
+
+`validate` and `report` both run before a merge. The merge driver is the guard
+that runs during one.
+
+The reason it exists is the measurement at the top of this document: upstream
+added 87 lines to `pkg/management/postgres/instance.go` and the trial merge
+reported a clean tree. Git's own conflict signal is not evidence that a merge
+was safe, so the fork adds a signal of its own.
+
+`.gitattributes` at the repository root is generated from `boundary.yaml`. Every
+path whose ownership obliges a human to read the upstream hunks — `adapted`,
+`disabled`, `deleted` — is routed through a merge driver named
+`cnpatroni-boundary`, which reports every such merge as unresolved:
+
+```text
+pkg/management/postgres/instance.go cnpatroni-boundary=adapted merge=cnpatroni-boundary
+```
+
+Paths CloudNativePatroni owns outright carry the attribute but no driver:
+upstream has no counterpart to merge, so a file arriving there is a name
+collision, which the divergence report already reports. The catch-all rule is
+never rendered — an attribute line for `**` would route the whole repository
+through the driver. `git check-attr` explains any path:
+
+```bash
+git check-attr -a pkg/management/postgres/instance.go
+# pkg/management/postgres/instance.go: merge: cnpatroni-boundary
+# pkg/management/postgres/instance.go: cnpatroni-boundary: adapted
+```
+
+### Regenerating the attributes
+
+The file is generated, and a hand edit is overwritten without warning. After any
+change to `boundary.yaml`:
+
+```bash
+cd hack/cnpatroni/upstream
+go run ./cmd/cnpatroni-upstream gitattributes           # write it
+go run ./cmd/cnpatroni-upstream gitattributes --stdout  # print it instead
+go run ./cmd/cnpatroni-upstream gitattributes --check   # exit 4 if it is stale
+```
+
+A stale file is not cosmetic: it guards a boundary that has moved. Regenerate it
+in the same commit that changes the manifest.
+
+### Resolving a forced boundary conflict
+
+When the driver fires, git stops the merge, records the three stages in the
+index and prints which path stopped it. `git status` shows the path as `UU`.
+
+1. Read what upstream changed, which is the whole point of the stop:
+
+   ```bash
+   git diff --merge-base HEAD MERGE_HEAD -- pkg/management/postgres/instance.go
+   ```
+
+2. Look at the file. It comes in one of two shapes.
+
+   - **It has conflict markers.** The two sides really did collide. The markers
+     are diff3-style and labelled `ours (CloudNativePatroni)`, `base (last
+     integrated upstream)` and `theirs (upstream)`, so the middle section tells
+     you what upstream started from. Resolve them by hand.
+   - **It has no markers.** This is the case the guard exists for: git merged the
+     file cleanly and the driver stopped the merge anyway. The worktree already
+     holds the merged text and nothing was lost. There is nothing to edit — the
+     work is the review in step 3.
+
+3. Answer, in the pull request, the only question that matters under rule 1 of
+   `CLAUDE.md`: does the upstream change add a code path that starts, stops,
+   promotes, demotes or reconfigures Postgres? If it does, it belongs to Patroni
+   and it must not be absorbed as it stands.
+
+4. Stage the file and continue:
+
+   ```bash
+   git add pkg/management/postgres/instance.go
+   git merge --continue
+   ```
+
+5. Record what you decided in the merge commit body. `git rerere` caches the
+   resolution locally only, so the commit message is the only durable record.
+
+### What the driver does not catch
+
+Git invokes a merge driver only when both sides changed the file. While
+`classification_state` is still `target` and the fork holds upstream's code
+verbatim, an upstream change to a boundary file this fork has not yet edited is
+resolved by taking upstream's version outright, and the driver never runs. The
+guard becomes load-bearing as the adaptations land; until then the divergence
+report and the drift gate are what make those changes visible.
+
+The registration is also per clone, because git will not take a merge-driver
+definition from a tracked file — that would let any branch run a command on the
+machine that merges it. A clone that has never run `setup` has the attributes
+but no guard. This is why the driver is one of three independent mechanisms
+rather than the only one.
+
 ## The per-integration checklist
 
 Copy this into the integration pull request as a task list.
@@ -206,7 +322,8 @@ Copy this into the integration pull request as a task list.
 - [ ] 2. `cnpatroni-upstream report --stdout`. Read the verdict line before anything else.
 - [ ] 3. If `authority_surface_delta.undeclared` is non-empty, stop. Upstream introduced
       high-availability vocabulary in a file this fork does not track. Classify it in
-      `boundary.yaml`, get that change reviewed on its own, and restart at step 2.
+      `boundary.yaml`, regenerate `.gitattributes`, get that change reviewed on its own,
+      and restart at step 2.
 - [ ] 4. If `manifest_stability.collisions_with_cnpatroni_owned` is non-empty, stop.
       Upstream has taken a path this project owns; rename ours before merging.
 - [ ] 5. Create the integration branch and merge:
@@ -215,6 +332,8 @@ Copy this into the integration pull request as a task list.
 - [ ] 6. For every path the report lists as `adapted` or `disabled`, read the upstream hunks
       and answer in the pull request: does this add a code path that starts, stops, promotes,
       demotes or reconfigures PostgreSQL? Do this even when git merged the file cleanly.
+      The merge driver stops the merge on these paths precisely so that this step cannot be
+      skipped; see "Resolving a forced boundary conflict" above.
 - [ ] 7. If `gate.requires_regeneration`, run `make fmt vet generate manifests apidoc
       wordlist-ordered` and commit the regenerated files as a separate commit.
 - [ ] 8. If `gate.requires_authority_audit`, re-run the high-availability authority audit and
@@ -224,7 +343,8 @@ Copy this into the integration pull request as a task list.
       in the pull request. Do not skip it silently.
 - [ ] 10. If `gate.requires_adr_review`, tag the owning decision record and get an explicit
       acknowledgement from its author.
-- [ ] 11. `cnpatroni-upstream validate --drift` and the repository's own `make checks && make test` pass.
+- [ ] 11. `cnpatroni-upstream validate --drift`, `cnpatroni-upstream gitattributes --check` and
+      the repository's own `make checks && make test` pass.
 - [ ] 12. Open the pull request with `report.md` as the body. Do not squash.
 - [ ] 13. After the merge lands, update `last_integrated` in
       `hack/cnpatroni/upstream/upstream-baseline.yaml`, commit the report directory so the
