@@ -22,6 +22,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -613,6 +614,64 @@ func TestBaselineWriteRoundTripsExactData(t *testing.T) {
 		loaded.Buckets[0].Symbol != "pkg.A" || loaded.Buckets[1].Rule != "role.primary" ||
 		loaded.Buckets[1].Symbol != "pkg.B" {
 		t.Errorf("loaded buckets = %+v, want deterministic rule and symbol order", loaded.Buckets)
+	}
+}
+
+func TestBaselineWriteHeaderReferencesOnlyExistingDocs(t *testing.T) {
+	res := result(nil)
+	rules := ruleSetForFindings(res)
+	baseline := BuildBaseline(rules, res, nil, 0, "abc123", "2026-08-09 23:20:00 UTC")
+	path := filepath.Join(t.TempDir(), "baseline.yaml")
+	if err := baseline.Write(path); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	var headerLines []string
+	for _, line := range strings.Split(string(body), "\n") {
+		if !strings.HasPrefix(line, "#") {
+			break
+		}
+		headerLines = append(headerLines, line)
+	}
+	header := strings.Join(headerLines, "\n")
+	docPath := regexp.MustCompile(`docs/cnpatroni/[[:alnum:]_./-]+\.md`)
+	root := repositoryRoot(t)
+	for _, referencedPath := range docPath.FindAllString(header, -1) {
+		info, err := os.Stat(filepath.Join(root, filepath.FromSlash(referencedPath)))
+		if err != nil {
+			t.Errorf("generated baseline header references documentation path %q that is absent from the working tree: %v",
+				referencedPath, err)
+			continue
+		}
+		if !info.Mode().IsRegular() {
+			t.Errorf("generated baseline header references documentation path %q, but it is not a file", referencedPath)
+		}
+	}
+}
+
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+
+	// Go tests run from the package directory, so walk upward to find the
+	// repository-relative audit module rather than assuming the caller's cwd.
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd: %v", err)
+	}
+	for {
+		modulePath := filepath.Join(dir, "hack", "cnpatroni", "audit", "go.mod")
+		if info, statErr := os.Stat(modulePath); statErr == nil && info.Mode().IsRegular() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatalf("repository root not found above %s", dir)
+		}
+		dir = parent
 	}
 }
 
