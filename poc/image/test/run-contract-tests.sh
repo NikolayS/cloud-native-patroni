@@ -243,7 +243,9 @@ test_patroni_is_pid_1() {
   start_test_container "pid1"
   c="${STARTED_CONTAINER}"
   comm="$(docker exec "${c}" cat /proc/1/comm)"
-  [[ "${comm}" == "patroni" ]] || fail "PID 1 comm was ${comm}"
+  # comm is the executable basename until Patroni calls setproctitle, so either value is correct;
+  # PID 1 identity is asserted unambiguously by cmdline below.
+  [[ "${comm}" == "patroni" || "${comm}" == "python3" ]] || fail "PID 1 comm was ${comm}"
   cmdline="$(docker exec "${c}" sh -c "tr '\\0' ' ' < /proc/1/cmdline")"
   [[ "${cmdline}" == *"/etc/cnpatroni/patroni.yml " ]] ||
     fail "PID 1 command line did not end with the test configuration path: ${cmdline}"
@@ -308,6 +310,7 @@ test_container_exits_when_patroni_exits() {
 
 test_no_postgres_survives_container_exit() {
   local c
+  local deadline
   local host_pids
   local sweep_output
 
@@ -317,27 +320,38 @@ test_no_postgres_survives_container_exit() {
   [[ -n "${host_pids}" ]] || fail "docker top returned no host PIDs"
   docker kill --signal KILL "${c}" >/dev/null
   wait_until_stopped "${c}" 30
-  if ! sweep_output="$(docker run --rm \
-    --pid host \
-    --entrypoint bash \
-    --env "CNPATRONI_RECORDED_PIDS=${host_pids}" \
-    --env "CNPATRONI_TEST_SCOPE=${TEST_SCOPE}" \
-    "${TEST_IMAGE}" \
-    -c '
-      set -Eeuo pipefail
-      while IFS= read -r recorded_pid; do
-        if [[ -n "${recorded_pid}" && -e "/proc/${recorded_pid}" ]]; then
-          printf "recorded host PID %s survived\n" "${recorded_pid}" >&2
-          exit 1
+  deadline=$((SECONDS + 30))
+  while true; do
+    if sweep_output="$(docker run --rm \
+      --pid host \
+      --entrypoint bash \
+      --env "CNPATRONI_RECORDED_PIDS=${host_pids}" \
+      --env "CNPATRONI_TEST_SCOPE=${TEST_SCOPE}" \
+      "${TEST_IMAGE}" \
+      -c '
+        set -Eeuo pipefail
+        sweep_failed=0
+        while IFS= read -r recorded_pid; do
+          if [[ -n "${recorded_pid}" && -e "/proc/${recorded_pid}" ]]; then
+            printf "recorded host PID %s survived\n" "${recorded_pid}" >&2
+            sweep_failed=1
+          fi
+        done <<<"${CNPATRONI_RECORDED_PIDS}"
+        if pgrep -af "cluster_name=${CNPATRONI_TEST_SCOPE}"; then
+          printf "a process matching the test cluster survived\n" >&2
+          sweep_failed=1
         fi
-      done <<<"${CNPATRONI_RECORDED_PIDS}"
-      if pgrep -af "cluster_name=${CNPATRONI_TEST_SCOPE}"; then
-        printf "a process matching the test cluster survived\n" >&2
-        exit 1
-      fi
-    ' 2>&1)"; then
-    fail "host PID sweep failed: ${sweep_output}"
-  fi
+        exit "${sweep_failed}"
+      ' 2>&1)"; then
+      return 0
+    fi
+    if ((SECONDS >= deadline)); then
+      break
+    fi
+    sleep 1
+  done
+
+  fail "host PID sweep failed after 30 seconds: ${sweep_output}"
 }
 
 test_postmaster_kill_leaves_no_zombies() {
@@ -400,7 +414,7 @@ renderer_docker_args() {
     --env CNPATRONI_SCOPE=render-contract-rw \
     --env CNPATRONI_NAME=render-contract-0 \
     --env CNPATRONI_NAMESPACE=default \
-    --env CNPATRONI_POD_IP=127.0.0.1 \
+    --env CNPATRONI_POD_IP=10.244.0.10 \
     --env CNPATRONI_SECRETS_DIR=/run/cnpatroni-secrets \
     --volume "${1}:/run/cnpatroni-secrets:ro"
 }

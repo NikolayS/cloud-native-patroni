@@ -101,6 +101,17 @@ liveness probe against Patroni's `/liveness` endpoint.
 
 ## Known gaps
 
+- The live kind measurements in the Consequences section were taken on Apple
+  silicon, arm64. `/proc/1/comm` can report `patroni` or `python3` depending on
+  when it is sampled relative to Patroni's `setproctitle` call, so the recorded
+  value is not architecture-independent even though the process topology is.
+  The `/proc/1/cmdline` evidence identifies Patroni unambiguously on both.
+- When this record was written, the contract suite enforced only the last
+  assertion of each test — 8 of 28 — because `fail` returned into a suppressed
+  `errexit`. Every contract in the Enforcement table was therefore weaker than
+  it reads, and the assertion that PID 1's `comm` is `patroni` was among those
+  not enforced. The harness was fixed afterwards and now enforces every
+  assertion, with a self-test defending that property.
 - The 288 samples establish single writability only at their sample times. The
   direct-Pod write oracle could not be built when the fault was injected, so
   there is no evidence about client acknowledgements and no basis for claiming
