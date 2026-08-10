@@ -81,7 +81,8 @@ times. It is not evidence that only one node ever acknowledged a commit.
 ## Enforcement
 
 `poc/image/test/run-contract-tests.sh` builds the production image and runs
-eight container contracts:
+nine container contracts, alongside a self-test that defends the harness's own
+assertion enforcement:
 
 | Contract | What it asserts |
 |---|---|
@@ -91,6 +92,7 @@ eight container contracts:
 | `sigterm-shuts-postgres-down-gracefully` | SIGTERM stops the container with exit code 0 and the logs show both a fast-shutdown request and completed database shutdown. |
 | `container-exits-when-patroni-exits` | Killing Patroni's child stops the container, and no second high-availability loop starts. |
 | `no-postgres-survives-container-exit` | After SIGKILL of the container, none of the recorded host PIDs and no process matching the test Patroni scope survives. |
+| `survivor-sweep-reports-a-live-container` | The survivor sweep reports a container that was never killed, so the contract above cannot silently lose its ability to fail. |
 | `postmaster-kill-leaves-no-zombies` | With three sleeping Postgres backends, SIGKILL of the postmaster leaves no observed zombie while Patroni starts a replacement postmaster that answers SQL within 30 seconds. |
 | `rendered-config-is-valid-and-0600` | Patroni validates the rendered configuration, its mode is 0600, output exposes no password, and empty required variables and colliding credentials fail without exposing the secret. |
 
@@ -101,12 +103,29 @@ liveness probe against Patroni's `/liveness` endpoint.
 
 ## Known gaps
 
-- `no-postgres-survives-container-exit` currently passes on `linux/amd64` and
-  fails reproducibly on `linux/arm64`. The processes in the failing case do
-  eventually exit, and the cause is not established. Both observations were
-  taken on macOS, where Docker runs in a Linux virtual machine, so neither is
-  authoritative for a plain Linux host. The newly added container-contract CI
-  job is the first measurement on a representative host.
+- `no-postgres-survives-container-exit` reported a failure that was not one,
+  and its repair left the contract unable to report anything. The sweep matched
+  processes by `cluster_name`, a constant every container the suite starts
+  shares, across the whole host, so it found postmasters belonging to sibling
+  containers from earlier tests that were still running because their own
+  containers had never been killed. Reading `/proc/<pid>/cgroup` for each
+  reported process settled it: three distinct container IDs, none of them the
+  container under test. Nothing outlived its container. The check that inspects
+  the killed container's own recorded PIDs passed on every run, local and both
+  CI runs, which is what should happen — when the init of a PID namespace
+  exits the kernel sends SIGKILL to every remaining process in it. That is a
+  stronger statement of this property than this record has previously carried.
+  The repair, which removes every container the suite has created immediately
+  before the sweep, includes the container under test, so it destroys the
+  evidence a moment before the sweep looks for it. Demonstrated by removing the
+  SIGKILL entirely, leaving the container running with its postmaster alive at
+  sweep time: the contract reported PASS. That state began at commit
+  `6f25926d`, so its two CI runs and every green until this change are vacuous
+  for this contract; the two runs of `9544d5b7` before it were an honest red.
+  Both defects are now fixed: the sweep
+  is scoped to the container under test by cgroup, and a companion contract
+  asserts that it reports a container which was never killed, so a repair that
+  removes its ability to fail cannot pass again.
 - The live kind measurements in the Consequences section were taken on Apple
   silicon, arm64. `/proc/1/comm` can report `patroni` or `python3` depending on
   when it is sampled relative to Patroni's `setproctitle` call, so the recorded

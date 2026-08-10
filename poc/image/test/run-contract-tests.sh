@@ -33,7 +33,6 @@ readonly RUN_ID="${$}"
 readonly PROD_IMAGE="cnpatroni-postgres:18.4-patroni-4.1.4-contract-${RUN_ID}"
 readonly TEST_IMAGE="cnpatroni-postgres-test:18.4-patroni-4.1.4-contract-${RUN_ID}"
 readonly PLATFORM="${CNPATRONI_PLATFORM:-linux/arm64}"
-readonly TEST_SCOPE="cnpatroni-contract-rw"
 
 declare -a CREATED_CONTAINERS=()
 declare -a CREATED_VOLUMES=()
@@ -307,41 +306,63 @@ test_container_exits_when_patroni_exits() {
     fail "Patroni emitted a second HA-loop startup marker after its child was killed"
 }
 
+# Reports processes that still belong to the given container. Prints each on
+# stderr and exits non-zero when any is found. Scoping by cgroup rather than by
+# cluster name is deliberate: the name is a constant shared by every container
+# the suite starts, so a name match finds siblings this container does not own.
+sweep_container_survivors() {
+  local container_id="$1"
+  local recorded_pids="$2"
+
+  docker run --rm \
+    --pid host \
+    --entrypoint bash \
+    --env "CNPATRONI_RECORDED_PIDS=${recorded_pids}" \
+    --env "CNPATRONI_CONTAINER_ID=${container_id}" \
+    "${TEST_IMAGE}" \
+    -c '
+      set -Eeuo pipefail
+      sweep_failed=0
+      while IFS= read -r recorded_pid; do
+        if [[ -n "${recorded_pid}" && -e "/proc/${recorded_pid}" ]]; then
+          printf "a recorded process of the container under test outlived it: host PID %s\n" \
+            "${recorded_pid}" >&2
+          sweep_failed=1
+        fi
+      done <<<"${CNPATRONI_RECORDED_PIDS}"
+      for proc_dir in /proc/[0-9]*; do
+        if grep -qs -- "${CNPATRONI_CONTAINER_ID}" "${proc_dir}/cgroup"; then
+          printf "a process in the cgroup of the container under test (%s) survived: PID %s %s\n" \
+            "${CNPATRONI_CONTAINER_ID:0:12}" "${proc_dir#/proc/}" \
+            "$(tr "\0" " " < "${proc_dir}/cmdline" 2>/dev/null)" >&2
+          sweep_failed=1
+        fi
+      done
+      exit "${sweep_failed}"
+    ' 2>&1
+}
+
 test_no_postgres_survives_container_exit() {
   local c
+  local container_id
   local deadline
   local host_pids
   local sweep_output
 
   start_test_container "namespace-exit"
   c="${STARTED_CONTAINER}"
+  container_id="$(docker inspect --format '{{.Id}}' "${c}")"
   host_pids="$(docker top "${c}" | awk 'NR > 1 {print $2}')"
   [[ -n "${host_pids}" ]] || fail "docker top returned no host PIDs"
   docker kill --signal KILL "${c}" >/dev/null
   wait_until_stopped "${c}" 30
-  deadline=$((SECONDS + 30))
+  # Containers started by earlier tests are irrelevant here because the sweep is
+  # scoped to this container's cgroup, so nothing has to be torn down early. The
+  # short deadline absorbs runtime teardown lag only: a genuine survivor persists
+  # and still fails the contract.
+  deadline=$((SECONDS + 10))
   while true; do
-    if sweep_output="$(docker run --rm \
-      --pid host \
-      --entrypoint bash \
-      --env "CNPATRONI_RECORDED_PIDS=${host_pids}" \
-      --env "CNPATRONI_TEST_SCOPE=${TEST_SCOPE}" \
-      "${TEST_IMAGE}" \
-      -c '
-        set -Eeuo pipefail
-        sweep_failed=0
-        while IFS= read -r recorded_pid; do
-          if [[ -n "${recorded_pid}" && -e "/proc/${recorded_pid}" ]]; then
-            printf "recorded host PID %s survived\n" "${recorded_pid}" >&2
-            sweep_failed=1
-          fi
-        done <<<"${CNPATRONI_RECORDED_PIDS}"
-        if pgrep -af "cluster_name=${CNPATRONI_TEST_SCOPE}"; then
-          printf "a process matching the test cluster survived\n" >&2
-          sweep_failed=1
-        fi
-        exit "${sweep_failed}"
-      ' 2>&1)"; then
+    if sweep_output="$(sweep_container_survivors "${container_id}" "${host_pids}")"; then
       return 0
     fi
     if ((SECONDS >= deadline)); then
@@ -350,7 +371,32 @@ test_no_postgres_survives_container_exit() {
     sleep 1
   done
 
-  fail "host PID sweep failed after 30 seconds: ${sweep_output}"
+  fail "processes of the killed container survived: ${sweep_output}"
+}
+
+# The contract above is only evidence if it can fail, and a previous repair to
+# it removed that ability by destroying the container immediately before the
+# sweep ran. A container that was never killed is the blatant case: its own
+# postmaster is alive in its own cgroup, so the sweep must report it. This
+# contract is what stops that regression recurring.
+test_survivor_sweep_reports_a_live_container() {
+  local c
+  local container_id
+  local host_pids
+  local sweep_output
+
+  start_test_container "sweep-discriminates"
+  c="${STARTED_CONTAINER}"
+  container_id="$(docker inspect --format '{{.Id}}' "${c}")"
+  host_pids="$(docker top "${c}" | awk 'NR > 1 {print $2}')"
+  [[ -n "${host_pids}" ]] || fail "docker top returned no host PIDs"
+
+  if sweep_output="$(sweep_container_survivors "${container_id}" "${host_pids}")"; then
+    fail "the sweep reported nothing for a container that was never killed"
+    return 1
+  fi
+  grep -Fq "in the cgroup of the container under test" <<<"${sweep_output}" ||
+    fail "the sweep did not report a cgroup survivor for a running container: ${sweep_output}"
 }
 
 test_postmaster_kill_leaves_no_zombies() {
@@ -495,6 +541,7 @@ main() {
   run_test "sigterm-shuts-postgres-down-gracefully" test_sigterm_shuts_postgres_down_gracefully
   run_test "container-exits-when-patroni-exits" test_container_exits_when_patroni_exits
   run_test "no-postgres-survives-container-exit" test_no_postgres_survives_container_exit
+  run_test "survivor-sweep-reports-a-live-container" test_survivor_sweep_reports_a_live_container
   run_test "postmaster-kill-leaves-no-zombies" test_postmaster_kill_leaves_no_zombies
   run_test "rendered-config-is-valid-and-0600" test_rendered_config_is_valid_and_0600
   ((FAILURES == 0))
