@@ -357,6 +357,88 @@ machine that merges it. A clone that has never run `setup` has the attributes
 but no guard. This is why the driver is one of three independent mechanisms
 rather than the only one.
 
+## Three worked examples
+
+The argument at the top of this document is that git's notion of a clean merge
+is textual, and that only a semantic gate distinguishes clean from safe. That
+argument is easier to act on with cases attached. This fork has now produced
+three in its own tree, with no adversary and no upstream change involved. They
+are recorded here because the mechanism is the one an upstream merge would
+exercise, and because each cost more to find than to describe.
+
+Each was found by whoever introduced it. That is the point rather than an
+apology: the practice below is only useful when it is applied to your own
+instruments, at the moment they report success.
+
+### A clean merge that did not compile
+
+Two changes, each correct on its own. One widened a function's signature; the
+other added a test that called the old one. They touched different regions of
+different files, so git merged them with no conflict and no warning.
+
+The result did not build. The authority audit reported `250 findings, 112
+classified symbols, 0 violations` and exited 0, because it analyses the tree it
+is given and does not compile test files. Only `go vet ./...` failed.
+
+**The rule.** Git's conflict signal answers whether two people edited the same
+text, not whether the result still works. A tool that reports on its own
+analysis is not evidence that the package it lives in compiles. Run
+`go vet ./...` and `go test ./...` in each module before the semantic gates,
+and run them on the merged tree — the tree that needs checking is the one that
+did not exist until the merge.
+
+### A repair that made a contract unable to fail
+
+A container contract asserted that no Postgres process outlives its container.
+Its sweep matched processes by cluster name, a constant every container in the
+suite shares, and searched the whole host, so it reported postmasters belonging
+to sibling containers that had never been killed. That was a false positive,
+and it was loud: a red gate that drew hours of attention.
+
+The repair removed every container the suite had created immediately before the
+sweep ran. That set included the container under test, so the contract began
+passing by destroying the evidence a moment before looking for it. Deleting the
+kill entirely — container fully alive, postmaster running, the most direct
+violation the contract can have — still produced a pass.
+
+The window runs from `6f25926d` until the sweep was scoped to the container
+under test by cgroup. Every green for that contract inside the window is
+vacuous; the red runs before it were honest.
+
+**The rule, which is the asymmetry rather than the incident.** A false positive
+is loud and red and gets attention until someone explains it. A false negative
+is silent and green and survives indefinitely. Repairing the first is a natural
+place to introduce the second, because the pressure is to make the gate stop
+complaining. When a gate moves from red to green, establish that the new green
+can still turn red.
+
+### Checks that could not produce the other answer
+
+Both cases above are instances of one pattern, which appeared often enough in a
+single integration to be worth naming rather than re-deriving. In each,
+something reported success while measuring nothing:
+
+- A manifest carrying `provisional: true` downgrades the undeclared-vocabulary
+  finding to a warning, so a plain `validate` was green while the finding under
+  test only appears under `--strict`.
+- An exit status was read from the end of a pipeline, reporting the status of
+  `tail` rather than of the command being checked.
+- The drift check compares the fork base with `HEAD`, so a probe left
+  uncommitted in the worktree was invisible to it and the test of that check
+  passed without exercising it.
+- A search for prohibited terms was built from terms a constraint had already
+  forbidden, so its empty result was guaranteed by the instruction rather than
+  by the tree.
+- A container filter named a prefix no container used. The image half of the
+  same check worked, which lent the broken half credibility; it could not have
+  found a leak.
+
+**The rule.** Before believing a check, make it produce the other answer. Break
+the thing it asserts, watch it fail, then restore it. Prefer the bluntest
+violation available: a check that fails only on subtle input is close enough to
+one that does not fail. A check that has only ever been seen to pass is
+indistinguishable from a check that cannot.
+
 ## The per-integration checklist
 
 Copy this into the integration pull request as a task list.
