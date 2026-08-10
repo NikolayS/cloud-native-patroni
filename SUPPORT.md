@@ -1,30 +1,16 @@
-# Commercial Support for CloudNativePG
+# Support
 
-CloudNativePG is an independent open-source project and does not officially
-endorse any specific company or service provider.
+There is no support for CloudNativePatroni, commercial or community.
 
-However, to assist users in finding professional support, the
-"[Commercial Support](https://cloudnative-pg.io/support/)"
-page offers an alphabetical list of companies and individuals providing
-CloudNativePG-related products or services.
+The project is a pre-alpha architecture spike with no releases and nothing to
+install. There is no issue triage rota, no service-level commitment, and no list
+of support providers. This file exists so that nobody has to infer any of that.
 
-*Please note that the CloudNativePG authors are not responsible for the accuracy
-or content provided by the listed companies or individuals.*
+If you are looking for support for a Postgres operator you can run today, that
+is a question for the project you are running, not for this one. Do not send
+questions about CloudNativePatroni to the CloudNativePG support channels.
 
-## How to Get Listed
+This file will be replaced when the project has something to support.
 
-To have your company or personal services featured on this list, please submit
-a [pull request to the CloudNativePG website](https://github.com/cloudnative-pg/cloudnative-pg.github.io)
-by adding a `.md` file in the [`content/support` folder](https://github.com/cloudnative-pg/cloudnative-pg.github.io/tree/main/content/support)
-containing the following information:
-
-1. **Organisation Name**: Clearly specify the name of your company or entity.
-2. **Organisation Logo**: Provide your company logo in SVG format.
-3. **Website Link**: Include a link to your homepage or a dedicated landing
-  page that explicitly mentions CloudNativePG support and includes at least one
-  link back to [cloudnative-pg.io](https://cloudnative-pg.io).
-
-[CloudNativePG maintainers will vet each submission](https://github.com/cloudnative-pg/governance/blob/main/GOVERNANCE.md#voting)
-and reserve the right to reject your application or request changes if your website
-doesn’t clearly mention CloudNativePG support or if it doesn't include at least
-one link back to [cloudnative-pg.io](https://cloudnative-pg.io).
+> CloudNativePatroni is an independent project derived from CloudNativePG. It is not affiliated
+> with or endorsed by CloudNativePG, CNCF, LF Projects, or the Patroni maintainers.
