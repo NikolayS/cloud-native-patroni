@@ -119,6 +119,9 @@ func LoadRules(path string) (*RuleSet, error) {
 	if rs.Schema != rulesSchema {
 		return nil, fmt.Errorf("rules schema is %q, want %q", rs.Schema, rulesSchema)
 	}
+	if len(rs.Rules) == 0 {
+		return nil, fmt.Errorf("the rule set declares no rules")
+	}
 	if len(rs.Scope.Roots) == 0 {
 		rs.Scope.Roots = []string{"."}
 	}

@@ -122,7 +122,7 @@ jobs:
             "${base}:hack/cnpatroni/audit/policy/authority-baseline.yaml" 2>/dev/null
           then
             bootstrap_base="b22682115c5f3ad1bfe69bed719151d0db918e39"
-            bootstrap_baseline_blob="d195581032a851eab6119da62b41dd903bd585f4"
+            bootstrap_baseline_blob="5389e6a53e13300cee41d29d2d28fa6bbab587e3"
             current_baseline_blob="$(
               git hash-object hack/cnpatroni/audit/policy/authority-baseline.yaml
             )"

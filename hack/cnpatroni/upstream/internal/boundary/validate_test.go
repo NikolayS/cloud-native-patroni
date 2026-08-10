@@ -247,6 +247,97 @@ func TestValidateRejectsIllegalGlobs(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsUncompilableAuditScanPatterns(t *testing.T) {
+	tests := []struct {
+		name        string
+		old         string
+		replacement string
+		list        string
+	}{
+		{
+			name:        "include",
+			old:         `include: ["**/*.go"]`,
+			replacement: `include: ["**/*.go["]`,
+			list:        "audit_scan.include",
+		},
+		{
+			name:        "exclude",
+			old:         `exclude: ["**/*_test.go"]`,
+			replacement: `exclude: ["**/*_test.go["]`,
+			list:        "audit_scan.exclude",
+		},
+		{
+			name:        "generated_artifacts",
+			old:         `generated_artifacts: ["api/**"]`,
+			replacement: `generated_artifacts: ["api/**["]`,
+			list:        "generated_artifacts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			vf := newValidateFixture(t)
+			body := strings.Replace(manifestBody(false, validRules, ""), tt.old, tt.replacement, 1)
+
+			findings := vf.validate(t, body, boundary.Options{})
+			found := false
+			for _, f := range findings {
+				if f.Code == "V4" && f.Severity == boundary.SeverityError &&
+					strings.Contains(f.Message, tt.list) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("findings = %v, want a V4 error naming %s", findings, tt.list)
+			}
+			if code := boundary.ExitCode(findings); code != 4 {
+				t.Errorf("exit code = %d, want 4", code)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsAnEmptyAuditTermList(t *testing.T) {
+	vf := newValidateFixture(t)
+	body := strings.Replace(manifestBody(false, validRules, ""),
+		`audit_terms: ["TargetPrimary", "pg_ctl"]`, "audit_terms: []", 1)
+
+	findings := vf.validate(t, body, boundary.Options{})
+	for _, f := range findings {
+		if f.Code == "V14" && f.Severity == boundary.SeverityError &&
+			strings.Contains(f.Message, "vocabulary check reports nothing") {
+			return
+		}
+	}
+	t.Fatalf("an empty audit_terms list produced no V14 error: %v", findings)
+}
+
+func TestAuditTermScanStaysOnWhenAnIncludePatternIsBroken(t *testing.T) {
+	vf := newValidateFixture(t)
+	body := strings.Replace(manifestBody(false, `  - id: absorb
+    ownership: upstream-untouched
+    paths: ["**"]
+`, ""), `include: ["**/*.go"]`, `include: ["**/*.go["]`, 1)
+
+	findings := vf.validate(t, body, boundary.Options{})
+	want := map[string]bool{
+		"pkg/management/postgres/instance.go": false,
+		"internal/controller/replicas.go":     false,
+	}
+	for _, f := range findings {
+		if f.Code == "V9" {
+			if _, ok := want[f.Path]; ok {
+				want[f.Path] = true
+			}
+		}
+	}
+	for path, found := range want {
+		if !found {
+			t.Errorf("no V9 finding for %s: one uncompilable include pattern silenced the check: %v", path, findings)
+		}
+	}
+}
+
 // A manifest entry for a path this fork no longer carries must be reported,
 // rather than silently classifying nothing.
 func TestValidateReportsAManifestEntryForAnAbsentPath(t *testing.T) {

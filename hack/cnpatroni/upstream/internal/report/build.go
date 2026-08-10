@@ -404,7 +404,7 @@ func buildAuthorityDelta(r *Report, opts Options, from, to string) error {
 	isHA := map[string]bool{}
 
 	for _, path := range atTo {
-		if !inAuditScan(m, path) {
+		if !m.InAuditScan(path) {
 			continue
 		}
 		isHA[path] = true
@@ -422,7 +422,7 @@ func buildAuthorityDelta(r *Report, opts Options, from, to string) error {
 
 	removed := r.AuthoritySurfaceDelta.RemovedHAFiles
 	for _, path := range atFrom {
-		if !isHA[path] && inAuditScan(m, path) {
+		if !isHA[path] && m.InAuditScan(path) {
 			removed = append(removed, path)
 		}
 	}
@@ -433,27 +433,6 @@ func buildAuthorityDelta(r *Report, opts Options, from, to string) error {
 	sort.Strings(r.AuthoritySurfaceDelta.Undeclared)
 
 	return nil
-}
-
-func inAuditScan(m *boundary.Manifest, path string) bool {
-	included := len(m.AuditScan.Include) == 0
-	for _, pattern := range m.AuditScan.Include {
-		if g, err := boundary.CompileGlob(pattern); err == nil && g.Match(path) {
-			included = true
-
-			break
-		}
-	}
-	if !included {
-		return false
-	}
-	for _, pattern := range m.AuditScan.Exclude {
-		if g, err := boundary.CompileGlob(pattern); err == nil && g.Match(path) {
-			return false
-		}
-	}
-
-	return true
 }
 
 // buildManifestStability reports the declared literal paths that upstream no

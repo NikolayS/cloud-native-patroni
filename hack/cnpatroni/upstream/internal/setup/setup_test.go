@@ -22,7 +22,9 @@ package setup_test
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -259,24 +261,150 @@ func TestSetupRegistersTheBoundaryMergeDriver(t *testing.T) {
 	}
 
 	driver := strings.TrimSpace(fork.Git("config", "--get", "merge.cnpatroni-boundary.driver"))
-	if !strings.Contains(driver, "merge-driver %O %A %B %L %P") {
-		t.Errorf("driver command %q does not pass git's five placeholders", driver)
+	// Git hands the whole command to a shell, so the path and every placeholder
+	// are single-quoted; see TestSetupQuotesTheRegisteredDriverPath.
+	quoted, ok := strings.CutSuffix(driver, " merge-driver '%O' '%A' '%B' '%L' '%P'")
+	if !ok {
+		t.Fatalf("driver command %q does not pass git's five placeholders, quoted", driver)
 	}
-	command := strings.Fields(driver)
-	if len(command) == 0 || !filepath.IsAbs(command[0]) {
+	binary, ok := strings.CutPrefix(quoted, "'")
+	if !ok {
+		t.Fatalf("driver command %q does not quote the driver path", driver)
+	}
+	binary, ok = strings.CutSuffix(binary, "'")
+	if !ok {
+		t.Fatalf("driver command %q does not quote the driver path", driver)
+	}
+	if !filepath.IsAbs(binary) {
 		t.Fatalf("driver command %q must start with an absolute path", driver)
 	}
-	if info, err := os.Stat(command[0]); err != nil || info.Mode().Perm()&0o100 == 0 {
-		t.Fatalf("the registered driver %q is not an executable file: %v", command[0], err)
+	if info, err := os.Stat(binary); err != nil || info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("the registered driver %q is not an executable file: %v", binary, err)
 	}
 
 	// The installed binary must sit outside the worktree, or every merge would
 	// start from a dirty tree.
-	if strings.HasPrefix(command[0], filepath.Join(fork.Root, "bin")) {
-		t.Errorf("the driver was installed inside the worktree: %s", command[0])
+	if strings.HasPrefix(binary, filepath.Join(fork.Root, "bin")) {
+		t.Errorf("the driver was installed inside the worktree: %s", binary)
 	}
 	if status := strings.TrimSpace(fork.Git("status", "--porcelain")); status != "" {
 		t.Errorf("registering the driver dirtied the worktree:\n%s", status)
+	}
+}
+
+func TestSetupQuotesTheRegisteredDriverPath(t *testing.T) {
+	upstream := newUpstream(t)
+	fork := gittest.NewNamed(t, "x;true;#")
+	fork.Write("a.go", "package a\n")
+	fork.Commit("fork")
+
+	repo := fork.Repo(t)
+	opts := options(repo, "file://"+upstream.Root)
+	opts.DriverBinary = driverBinary(t)
+	if _, err := setup.Run(opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	commonDir, err := repo.CommonDir()
+	if err != nil {
+		t.Fatalf("CommonDir: %v", err)
+	}
+	destination := filepath.Join(commonDir, "cnpatroni", "cnpatroni-upstream")
+	want := "'" + destination + "' merge-driver '%O' '%A' '%B' '%L' '%P'"
+	if got := strings.TrimSpace(fork.Git("config", "--get", "merge.cnpatroni-boundary.driver")); got != want {
+		t.Errorf("driver command = %q, want %q", got, want)
+	}
+
+	info, err := os.Stat(destination)
+	if err != nil {
+		t.Fatalf("the installed driver %q does not exist: %v", destination, err)
+	}
+	if !info.Mode().IsRegular() || info.Mode().Perm()&0o111 == 0 {
+		t.Fatalf("the installed driver %q is not executable: mode %v", destination, info.Mode())
+	}
+}
+
+func TestSetupRefusesAGitDirectoryThatCannotBeQuoted(t *testing.T) {
+	for _, dirName := range []string{"it's-a-clone", "we\nird"} {
+		t.Run(dirName, func(t *testing.T) {
+			upstream := newUpstream(t)
+			fork := gittest.NewNamed(t, dirName)
+			fork.Write("a.go", "package a\n")
+			fork.Commit("fork")
+
+			repo := fork.Repo(t)
+			commonDir, err := repo.CommonDir()
+			if err != nil {
+				t.Fatalf("CommonDir: %v", err)
+			}
+			destination := filepath.Join(commonDir, "cnpatroni", "cnpatroni-upstream")
+			opts := options(repo, "file://"+upstream.Root)
+			opts.DriverBinary = driverBinary(t)
+
+			_, err = setup.Run(opts)
+			if err == nil {
+				t.Fatalf("Run returned no error for git directory %q", commonDir)
+			}
+			if !strings.Contains(err.Error(), strconv.Quote(destination)) || !strings.Contains(err.Error(), "move the clone") {
+				t.Errorf("error %q should name %q and say the clone must be moved", err, destination)
+			}
+			if got, _, configErr := repo.RunAllowFail("config", "--get", "merge.cnpatroni-boundary.driver"); configErr == nil {
+				t.Errorf("the boundary driver was registered as %q after setup rejected its path", strings.TrimSpace(got))
+			}
+		})
+	}
+}
+
+func TestShellQuoteProducesASingleShellWord(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is not on PATH")
+	}
+
+	for _, input := range []string{
+		"plain",
+		"with space",
+		"x;true;#",
+		"$(touch marker)",
+		`back\slash`,
+		`"double"`,
+	} {
+		t.Run(input, func(t *testing.T) {
+			upstream := newUpstream(t)
+			fork := gittest.NewNamed(t, input)
+			fork.Write("a.go", "package a\n")
+			fork.Commit("fork")
+
+			repo := fork.Repo(t)
+			opts := options(repo, "file://"+upstream.Root)
+			opts.DriverBinary = driverBinary(t)
+			if _, err := setup.Run(opts); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+
+			driver := strings.TrimSpace(fork.Git("config", "--get", "merge.cnpatroni-boundary.driver"))
+			// The placeholders are quoted too: %P is a tracked pathname that
+			// upstream controls, so leaving it bare is a second injection
+			// surface of exactly the kind this test exists to close.
+			quoted, ok := strings.CutSuffix(driver, " merge-driver '%O' '%A' '%B' '%L' '%P'")
+			if !ok {
+				t.Fatalf("driver command %q does not have the expected argument suffix", driver)
+			}
+			commonDir, err := repo.CommonDir()
+			if err != nil {
+				t.Fatalf("CommonDir: %v", err)
+			}
+			want := filepath.Join(commonDir, "cnpatroni", "cnpatroni-upstream")
+			cmd := exec.Command(bash, "-c", "printf '%s' "+quoted)
+			cmd.Dir = t.TempDir()
+			got, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("evaluating shell word %q: %v", quoted, err)
+			}
+			if string(got) != want {
+				t.Errorf("shell word %q produced %q, want %q", quoted, got, want)
+			}
+		})
 	}
 }
 

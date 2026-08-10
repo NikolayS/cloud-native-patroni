@@ -45,9 +45,16 @@ type Fixture struct {
 func New(t *testing.T) *Fixture {
 	t.Helper()
 
-	root := filepath.Join(t.TempDir(), "repo")
+	return NewNamed(t, "repo")
+}
+
+// NewNamed exists because merge-driver tests need a repository whose path carries shell metacharacters.
+func NewNamed(t *testing.T, dirName string) *Fixture {
+	t.Helper()
+
+	root := filepath.Join(t.TempDir(), dirName)
 	if err := os.MkdirAll(root, 0o750); err != nil {
-		t.Fatalf("MkdirAll: %v", err)
+		t.Fatalf("MkdirAll(%q): %v", root, err)
 	}
 
 	f := &Fixture{t: t, Root: root}
