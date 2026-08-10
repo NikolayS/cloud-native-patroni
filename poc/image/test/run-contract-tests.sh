@@ -70,6 +70,19 @@ fail() {
   return 1
 }
 
+# Every container in this suite renders the same Patroni scope, and containers
+# started by earlier tests keep running until the EXIT trap fires. A host-wide
+# sweep for the scope therefore matches their postmasters, not the ones under
+# test. Removing them first is what makes such a sweep mean what it says.
+quiesce_suite_containers() {
+  local container
+
+  for container in "${CREATED_CONTAINERS[@]}"; do
+    docker rm -f -v "${container}" >/dev/null 2>&1 || true
+  done
+  CREATED_CONTAINERS=()
+}
+
 wait_until_stopped() {
   local container="$1"
   local timeout_seconds="$2"
@@ -319,6 +332,11 @@ test_no_postgres_survives_container_exit() {
   [[ -n "${host_pids}" ]] || fail "docker top returned no host PIDs"
   docker kill --signal KILL "${c}" >/dev/null
   wait_until_stopped "${c}" 30
+  # The recorded PIDs below prove this container's processes are gone. The
+  # scope sweep additionally catches a postmaster that re-execed into a PID
+  # the recording never saw, which is only meaningful once no other container
+  # in the suite is holding the same scope open. Later tests start their own.
+  quiesce_suite_containers
   deadline=$((SECONDS + 30))
   while true; do
     if sweep_output="$(docker run --rm \
