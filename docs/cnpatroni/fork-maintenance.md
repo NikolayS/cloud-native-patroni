@@ -59,7 +59,7 @@ them; the trailing `**` rule absorbs everything not declared.
 | `cnpatroni-owned` | Created by CloudNativePatroni; upstream has no counterpart | Upstream touching it is a name collision, not a merge |
 | `deleted` | Removed in CloudNativePatroni | A modify/delete conflict is expected and classified as such |
 
-Two manifest-level fields qualify all of the above:
+The manifest-level fields below qualify or govern these declarations:
 
 - `classification_state: target` says the classes record the end state the M0
   authority audit decided on, not the current state of the code. At milestone M0
@@ -70,6 +70,12 @@ Two manifest-level fields qualify all of the above:
 - `provisional: true` downgrades the undeclared-vocabulary check from an error
   to a warning. Flip it to `false` in the change that accepts the M0 authority
   audit.
+- `ownership_ratchet_allow` acknowledges one deliberate literal path-pattern
+  drop from a `cnpatroni-owned` or `disabled` rule. Every entry requires the
+  base `rule` id, the exact dropped `path` pattern and a `reason` in the same
+  diff. It cannot acknowledge a class change or the removal of an entire rule;
+  after the narrowing is merged, the entry is reported as stale without
+  failing later changes.
 
 ## One-time setup of a clone
 

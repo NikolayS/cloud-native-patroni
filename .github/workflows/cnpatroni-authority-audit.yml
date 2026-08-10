@@ -34,6 +34,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The ownership ratchet comparison needs the merge base of the pull request.
+          fetch-depth: 0
 
       - name: Install Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -43,6 +46,40 @@ jobs:
 
       - name: Reject unreachable or duplicated code
         run: ./hack/cnpatroni/check-code-hygiene.sh
+
+      # The hygiene gate derives its scan set from boundary.yaml and therefore
+      # trusts that manifest. This ratchet stops a one-word reclassification
+      # from shrinking the scanned set in silence. It only protects what it
+      # runs on: mark this job a required status check on main, otherwise the
+      # ratchet is advisory.
+      - name: Verify the ownership boundary did not shrink
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+          else
+            # A direct push to main bypasses the pull request, so there is no
+            # merge base. Compare against the commit this one replaced, which
+            # is the tip main carried before the push for a single commit and
+            # the first parent for a merge.
+            base="$(git rev-parse "HEAD^")"
+          fi
+
+          if ! git cat-file -e \
+            "${base}:hack/cnpatroni/upstream/boundary.yaml" 2>/dev/null
+          then
+            echo "The merge base has no ownership boundary manifest; the ratchet cannot run." >&2
+            exit 1
+          fi
+
+          git show "${base}:hack/cnpatroni/upstream/boundary.yaml" \
+            > "${RUNNER_TEMP}/boundary-base.yaml"
+          go -C hack/cnpatroni/upstream run ./cmd/cnpatroni-upstream \
+            --repo "${GITHUB_WORKSPACE}" ownership-ratchet \
+            --base "${RUNNER_TEMP}/boundary-base.yaml"
+        env:
+          BASE_REF: ${{ github.base_ref }}
 
   authority-audit:
     name: Run the authority audit
