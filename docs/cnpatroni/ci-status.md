@@ -40,29 +40,42 @@ through `issue_comment` and `workflow_dispatch`; the inherited workflow also dec
 schedule. Every path needs cloud credentials this fork does not hold and an operator image this
 fork does not publish, so the suite does not run successfully here.
 
-## Open container-exit question
+## Container exit: a false alarm, and a contract that cannot fail
 
 `no-postgres-survives-container-exit` records the container's host PIDs, sends SIGKILL to the
-container, and asserts that none of those PIDs and no process matching the test cluster survives.
-From a clean start with nothing else running, it passes on `linux/amd64` and fails reproducibly on
-`linux/arm64` at its 30-second deadline. The processes do eventually exit; the cause is not
-established.
+container, and asserts that nothing belonging to it survives. It failed on `linux/arm64` and on both
+CI runs, and the failure was not what it looked like.
 
-Neither local result is authoritative. Both were measured on macOS through the `desktop-linux`
-Docker context, whose server reports Docker Desktop with kernel `6.12.54-linuxkit`. Docker runs
-inside that LinuxKit virtual machine: `--pid host` sweeps the virtual machine's PID namespace, not
-the macOS host's, and container teardown crosses a virtualisation layer absent from a plain Linux
-host. The arm64 failure may be teardown lag in that virtual machine, while the amd64 pass may be
-luck under emulation.
+The sweep's second check matched processes by `cluster_name`, a constant that every container the
+suite starts shares, and it ran with `--pid host`, so it searched the whole host. The processes it
+reported belonged to sibling containers from earlier tests, still alive because their own containers
+had never been killed. Reading `/proc/<pid>/cgroup` for each reported process settled it: three
+distinct container IDs, none of them the container under test.
 
-The container-contract CI job is consequently the first measurement of this property on a
-representative host. A consistent pass there is better evidence than either local platform can
-produce. A failure there matters more than a local flake: it would mean Postgres can outlive its
-container on an ordinary Linux host. If the container is reported stopped while its postmaster
-lingers and Kubernetes starts a replacement, the lingering process is an unsupervised writable
-postmaster.
+Nothing outlived its container. The other check, which inspects the killed container's own recorded
+PIDs, passed on every run — local, and both CI runs. That is what should happen: when the init of
+a PID namespace exits, the kernel sends SIGKILL to every remaining process in that namespace.
 
-This question is open, not resolved. A green board must not be read as closing it.
+The local runs did go through the `desktop-linux` Docker context, whose server reports Docker
+Desktop on kernel `6.12.54-linuxkit`, so `--pid host` swept that virtual machine's PID namespace
+rather than the macOS host's. That confound is real but turned out to be irrelevant here: the cause
+was a test-scoping bug that reproduces on any host, and it reproduced on a plain Linux runner.
+
+The repair for that false positive introduced a worse defect, which is open. It removes every
+container the suite has created immediately before the sweep, and that set includes the container
+under test, so the evidence is destroyed a moment before the sweep looks for it. Removing the
+SIGKILL entirely — leaving the container running with its postmaster alive at sweep time, the most
+direct violation the contract can have — still produces `PASS no-postgres-survives-container-exit`
+and a suite exit status of 0.
+
+That state began at commit `6f25926d`. Its two CI runs, and every green for this contract until the
+change described next, are vacuous; the two runs of `9544d5b7` before it were an honest red. Both
+defects are now fixed in the same change. The sweep is scoped to the container under test by
+cgroup, which is immune to either failure: sibling containers are in different cgroups and are
+correctly ignored, and nothing has to be destroyed before the sweep, so the early teardown is gone.
+A companion contract, `survivor-sweep-reports-a-live-container`, asserts that the sweep reports a
+container that was never killed — the blatant case that the previous repair silently passed. That
+contract is what stops this recurring: any future change to the sweep has to survive it.
 
 ## Code hygiene gate
 
