@@ -1,0 +1,418 @@
+/*
+Copyright © contributors to CloudNativePG, established as
+CloudNativePG a Series of LF Projects, LLC.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+SPDX-License-Identifier: Apache-2.0
+*/
+
+// Package cli is the command-line surface of the CloudNativePatroni upstream
+// tooling.
+package cli
+
+import (
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"time"
+
+	"github.com/postgres-ai/cnpatroni-upstream/internal/baseline"
+	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
+	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
+	"github.com/postgres-ai/cnpatroni-upstream/internal/report"
+	"github.com/postgres-ai/cnpatroni-upstream/internal/setup"
+)
+
+// Version is the tool version, reported in every machine-readable report.
+const Version = "0.1.0"
+
+// Exit codes. Codes 0 to 4 are shared with the report and the validator; 5 and
+// 6 belong to the command line.
+const (
+	// ExitOK means nothing needs a human.
+	ExitOK = 0
+	// ExitNeedsReview means upstream changed a path this fork adapts,
+	// disables or deletes.
+	ExitNeedsReview = 1
+	// ExitConflict means a textual conflict is predicted.
+	ExitConflict = 2
+	// ExitUndeclared means a path is not classified by the manifest.
+	ExitUndeclared = 3
+	// ExitManifestInvalid means the manifest or the baseline is malformed or
+	// dishonest.
+	ExitManifestInvalid = 4
+	// ExitUsage means the command line was wrong.
+	ExitUsage = 5
+	// ExitEnvironment means the clone cannot answer the question: it is
+	// shallow, or the upstream remote is missing. The message says what to run.
+	ExitEnvironment = 6
+)
+
+// Default locations, relative to the repository root.
+const (
+	defaultManifestPath = "hack/cnpatroni/upstream/boundary.yaml"
+	defaultBaselinePath = "hack/cnpatroni/upstream/upstream-baseline.yaml"
+	defaultReportDir    = "docs/cnpatroni/upstream-integration"
+)
+
+type globals struct {
+	repo         string
+	manifestPath string
+	baselinePath string
+	exitZero     bool
+}
+
+// Run executes one command line and returns the process exit code.
+func Run(args []string, stdout, stderr io.Writer) int {
+	var g globals
+
+	fs := flag.NewFlagSet("cnpatroni-upstream", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&g.repo, "repo", "", "repository root (default: the repository containing the working directory)")
+	fs.StringVar(&g.manifestPath, "manifest", "", "boundary manifest (default: "+defaultManifestPath+")")
+	fs.StringVar(&g.baselinePath, "baseline", "", "upstream baseline (default: "+defaultBaselinePath+")")
+	fs.BoolVar(&g.exitZero, "exit-zero", false, "always exit 0; findings are still printed")
+	fs.Usage = func() { usage(stderr) }
+
+	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+
+	rest := fs.Args()
+	if len(rest) == 0 {
+		usage(stderr)
+
+		return ExitUsage
+	}
+
+	code := dispatch(rest[0], rest[1:], g, stdout, stderr)
+	if g.exitZero && code != ExitUsage {
+		return ExitOK
+	}
+
+	return code
+}
+
+func dispatch(command string, args []string, g globals, stdout, stderr io.Writer) int {
+	switch command {
+	case "setup":
+		return runSetup(args, g, stdout, stderr)
+	case "validate":
+		return runValidate(args, g, stdout, stderr)
+	case "report":
+		return runReport(args, g, stdout, stderr)
+	case "version":
+		_, _ = fmt.Fprintf(stdout, "cnpatroni-upstream %s\n", Version)
+
+		return ExitOK
+	case "help", "-h", "--help":
+		usage(stdout)
+
+		return ExitOK
+	default:
+		_, _ = fmt.Fprintf(stderr, "unknown command %q\n\n", command)
+		usage(stderr)
+
+		return ExitUsage
+	}
+}
+
+func usage(w io.Writer) {
+	_, _ = fmt.Fprint(w, `cnpatroni-upstream keeps the CloudNativePatroni fork answerable about upstream
+CloudNativePG. It never mutates the worktree and never pushes.
+
+Usage:
+  cnpatroni-upstream [global flags] <command> [command flags]
+
+Global flags:
+  --repo       repository root
+  --manifest   boundary manifest (default `+defaultManifestPath+`)
+  --baseline   upstream baseline (default `+defaultBaselinePath+`)
+  --exit-zero  always exit 0; findings are still printed
+
+Commands:
+  setup      configure this clone: add the upstream remote, fetch tags, unshallow
+  validate   check the boundary manifest against the worktree and the history
+  report     compute the divergence between the recorded baseline and upstream
+  version    print the tool version
+
+Exit codes:
+  0 ok   1 needs review   2 conflict predicted   3 undeclared path
+  4 manifest invalid      5 usage                6 clone not set up
+`)
+}
+
+// openRepo resolves the repository and the two data files the commands need.
+func (g globals) openRepo() (*gitx.Repo, error) {
+	dir := g.repo
+	if dir == "" {
+		cwd, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		dir = cwd
+	}
+
+	return gitx.Open(dir)
+}
+
+func (g globals) manifestFile(repo *gitx.Repo) string {
+	if g.manifestPath != "" {
+		return g.manifestPath
+	}
+
+	return filepath.Join(repo.Root, filepath.FromSlash(defaultManifestPath))
+}
+
+func (g globals) baselineFile(repo *gitx.Repo) string {
+	if g.baselinePath != "" {
+		return g.baselinePath
+	}
+
+	return filepath.Join(repo.Root, filepath.FromSlash(defaultBaselinePath))
+}
+
+// classify turns an error into the right exit code, so that a clone that is
+// simply not set up is never confused with a broken manifest.
+func classify(err error, stderr io.Writer) int {
+	var envErr *gitx.EnvironmentError
+	if errors.As(err, &envErr) {
+		_, _ = fmt.Fprintf(stderr, "%s\n\n%s\n", envErr.Reason, envErr.Remedy)
+
+		return ExitEnvironment
+	}
+	_, _ = fmt.Fprintf(stderr, "%v\n", err)
+
+	return ExitManifestInvalid
+}
+
+func runSetup(args []string, g globals, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("setup", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	url := fs.String("url", "", "upstream repository URL (default: the URL recorded in the baseline)")
+	remote := fs.String("remote", "", "remote name (default: the name recorded in the baseline)")
+	track := fs.String("track", "", "upstream branch to track (default: the branch recorded in the baseline)")
+	dryRun := fs.Bool("dry-run", false, "print the git commands without running them")
+	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+
+	repo, err := g.openRepo()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+
+		return ExitUsage
+	}
+
+	opts := setup.Options{Repo: repo, URL: *url, Remote: *remote, Track: *track, DryRun: *dryRun, Out: stdout}
+
+	// The baseline records which upstream this fork follows, so setup does not
+	// need the URL on the command line.
+	if b, loadErr := baseline.Load(g.baselineFile(repo)); loadErr == nil {
+		if opts.URL == "" {
+			opts.URL = b.Upstream.URL
+		}
+		if opts.Remote == "" {
+			opts.Remote = b.Upstream.Remote
+		}
+		if opts.Track == "" {
+			opts.Track = b.Upstream.Track
+		}
+	} else if opts.URL == "" {
+		_, _ = fmt.Fprintf(stderr, "no upstream URL: %v\npass --url explicitly\n", loadErr)
+
+		return ExitUsage
+	}
+
+	if _, err := setup.Run(opts); err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+
+		return ExitManifestInvalid
+	}
+
+	if *dryRun {
+		_, _ = fmt.Fprint(stdout, "\nDry run: nothing was changed. Re-run without --dry-run to apply.\n")
+	}
+
+	return ExitOK
+}
+
+func runValidate(args []string, g globals, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	strict := fs.Bool("strict", false,
+		"treat undeclared high-availability files as an error even while the manifest is provisional")
+	drift := fs.Bool("drift", false, "also report files this fork changed without declaring them")
+	format := fs.String("format", "text", "output format: text or json")
+	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+	if *format != "text" && *format != "json" {
+		_, _ = fmt.Fprintf(stderr, "unknown format %q\n", *format)
+
+		return ExitUsage
+	}
+
+	repo, err := g.openRepo()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+
+		return ExitUsage
+	}
+
+	manifestPath := g.manifestFile(repo)
+	m, err := boundary.Load(manifestPath)
+	if err != nil {
+		return classify(err, stderr)
+	}
+	b, err := baseline.Load(g.baselineFile(repo))
+	if err != nil {
+		return classify(err, stderr)
+	}
+
+	findings, err := boundary.Validate(m, boundary.Options{
+		Repo: repo, Baseline: b, Strict: *strict, CheckDrift: *drift,
+	})
+	if err != nil {
+		return classify(err, stderr)
+	}
+
+	if *format == "json" {
+		body, marshalErr := json.MarshalIndent(findings, "", "  ")
+		if marshalErr != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", marshalErr)
+
+			return ExitManifestInvalid
+		}
+		_, _ = fmt.Fprintf(stdout, "%s\n", body)
+	} else {
+		printFindings(stdout, manifestPath, findings)
+	}
+
+	return boundary.ExitCode(findings)
+}
+
+func printFindings(stdout io.Writer, manifestPath string, findings []boundary.Finding) {
+	if len(findings) == 0 {
+		_, _ = fmt.Fprintf(stdout, "%s: valid\n", manifestPath)
+
+		return
+	}
+	for _, f := range findings {
+		_, _ = fmt.Fprintf(stdout, "%s: %s\n", f.Severity, f)
+	}
+	if remedy := boundary.RemediationFor(manifestPath, findings); remedy != "" {
+		_, _ = fmt.Fprintf(stdout, "\n%s", remedy)
+	}
+}
+
+func runReport(args []string, g globals, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("report", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	from := fs.String("from", "", "range start (default: the last integrated commit in the baseline)")
+	to := fs.String("to", "", "range end (default: the tracked upstream branch)")
+	fetch := fs.Bool("fetch", false, "fetch the upstream remote first")
+	outDir := fs.String("out-dir", "",
+		"directory for report.json and report.md (default: "+defaultReportDir+"/<date>-<sha12>)")
+	toStdout := fs.Bool("stdout", false, "also print the markdown report")
+	noConflictCheck := fs.Bool("no-conflict-check", false, "skip the merge conflict prediction")
+	if err := fs.Parse(args); err != nil {
+		return ExitUsage
+	}
+
+	repo, err := g.openRepo()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+
+		return ExitUsage
+	}
+
+	m, err := boundary.Load(g.manifestFile(repo))
+	if err != nil {
+		return classify(err, stderr)
+	}
+	b, err := baseline.Load(g.baselineFile(repo))
+	if err != nil {
+		return classify(err, stderr)
+	}
+
+	if *fetch {
+		if err := repo.RequireRemote(b.Upstream.Remote); err != nil {
+			return classify(err, stderr)
+		}
+		if _, err := repo.Run("fetch", "--no-tags", b.Upstream.Remote); err != nil {
+			_, _ = fmt.Fprintf(stderr, "%v\n", err)
+
+			return ExitManifestInvalid
+		}
+	}
+
+	r, err := report.Build(report.Options{
+		Repo: repo, Manifest: m, Baseline: b,
+		From: *from, To: *to,
+		SkipConflictCheck: *noConflictCheck,
+		ToolVersion:       Version,
+		Now:               time.Now,
+	})
+	if err != nil {
+		return classify(err, stderr)
+	}
+
+	dir := *outDir
+	if dir == "" {
+		dir = filepath.Join(repo.Root, filepath.FromSlash(defaultReportDir),
+			fmt.Sprintf("%s-%s", r.Range.To.Date, shortSHA(r.Range.To.Commit)))
+	}
+	if err := writeReport(dir, r); err != nil {
+		_, _ = fmt.Fprintf(stderr, "%v\n", err)
+
+		return ExitManifestInvalid
+	}
+
+	markdown := r.Markdown()
+	if *toStdout {
+		_, _ = fmt.Fprint(stdout, markdown)
+	}
+	_, _ = fmt.Fprintf(stderr, "%s\nReport written to %s\n", r.Gate.Verdict, dir)
+
+	return r.Gate.ExitCode
+}
+
+func writeReport(dir string, r *report.Report) error {
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return err
+	}
+
+	body, err := r.JSON()
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "report.json"), body, 0o600); err != nil {
+		return err
+	}
+
+	return os.WriteFile(filepath.Join(dir, "report.md"), []byte(r.Markdown()), 0o600)
+}
+
+func shortSHA(commit string) string {
+	if len(commit) > 12 {
+		return commit[:12]
+	}
+
+	return commit
+}

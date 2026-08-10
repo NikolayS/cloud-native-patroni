@@ -1,0 +1,167 @@
+# Keeps CloudNativePatroni answerable about upstream CloudNativePG.
+#
+# Two jobs:
+#
+#   boundary-guard      runs on every pull request and push. It validates the
+#                       boundary manifest against the worktree and fails when
+#                       this fork has changed a file it never declared. Mark it
+#                       a required status check; without that the whole system
+#                       is advisory.
+#
+#   divergence-report   runs weekly and on demand. It computes what upstream
+#                       has changed since the recorded baseline, intersects it
+#                       with the boundary manifest, and keeps exactly one open
+#                       tracking issue up to date.
+#
+# Scheduled workflows only fire from the repository's default branch. Until this
+# file reaches that branch, workflow_dispatch is the only trigger that works.
+name: cnpatroni-upstream-sync
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "cnpatroni/**"
+      - "spike/**"
+  schedule:
+    # Mondays at 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      to_ref:
+        description: "Upstream ref to compare against"
+        required: false
+        default: "upstream/main"
+
+permissions: read-all
+
+defaults:
+  run:
+    shell: 'bash -Eeuo pipefail -x {0}'
+
+concurrency:
+  group: cnpatroni-upstream-sync-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TOOL_DIR: hack/cnpatroni/upstream
+  ISSUE_LABEL: upstream-integration
+  ISSUE_MARKER: "<!-- cnpatroni-upstream-sync -->"
+
+jobs:
+
+  # The gate on our own changes.
+  boundary-guard:
+    name: Validate the CloudNativePatroni boundary manifest
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      -
+        name: Checkout with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The drift check compares HEAD with the recorded fork base, so the
+          # default shallow checkout is not enough.
+          fetch-depth: 0
+      -
+        name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: hack/cnpatroni/upstream/go.mod
+          check-latest: true
+      -
+        name: Unit-test the upstream tooling
+        run: |
+          cd "${TOOL_DIR}"
+          go vet ./...
+          go test ./...
+      -
+        name: Validate the manifest and check for undeclared changes
+        run: |
+          cd "${TOOL_DIR}"
+          go run ./cmd/cnpatroni-upstream --repo "${GITHUB_WORKSPACE}" validate --drift
+
+  # The watch on upstream's changes.
+  divergence-report:
+    name: Report the divergence from upstream CloudNativePG
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      -
+        name: Checkout with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      -
+        name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: hack/cnpatroni/upstream/go.mod
+          check-latest: true
+      -
+        name: Configure the upstream remote
+        run: |
+          cd "${TOOL_DIR}"
+          go run ./cmd/cnpatroni-upstream --repo "${GITHUB_WORKSPACE}" setup
+      -
+        name: Compute the report
+        id: report
+        env:
+          TO_REF: ${{ inputs.to_ref || 'upstream/main' }}
+        run: |
+          cd "${TOOL_DIR}"
+          set +e
+          go run ./cmd/cnpatroni-upstream --repo "${GITHUB_WORKSPACE}" \
+            report --to "${TO_REF}" --stdout > "${RUNNER_TEMP}/report.md"
+          echo "exit_code=$?" >> "${GITHUB_OUTPUT}"
+          set -e
+          cat "${RUNNER_TEMP}/report.md" >> "${GITHUB_STEP_SUMMARY}"
+      -
+        name: Upload the report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cnpatroni-upstream-report
+          path: docs/cnpatroni/upstream-integration/**
+          retention-days: 90
+          if-no-files-found: error
+      -
+        name: Update the tracking issue
+        # Exit code 0 means nothing needs a human, so no issue is opened.
+        if: steps.report.outputs.exit_code != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "${ISSUE_MARKER}"
+            echo
+            cat "${RUNNER_TEMP}/report.md"
+            echo
+            echo "Produced by ${RUN_URL}."
+          } > "${RUNNER_TEMP}/issue-body.md"
+
+          # One open issue at a time, keyed on the label. Later runs edit that
+          # issue in place instead of opening a new one, so the schedule cannot
+          # spam the tracker. Closing the issue after an integration lands makes
+          # the next run open a fresh one.
+          existing=$(gh issue list --state open --label "${ISSUE_LABEL}" \
+            --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            gh issue edit "${existing}" --body-file "${RUNNER_TEMP}/issue-body.md"
+          else
+            gh issue create --title "Upstream CloudNativePG integration status" \
+              --label "${ISSUE_LABEL}" --body-file "${RUNNER_TEMP}/issue-body.md"
+          fi
+      -
+        name: Fail the run when upstream changed a boundary path
+        # Exit code 3 or higher means the manifest itself is out of date, which
+        # is worth failing over; 1 and 2 are ordinary review work.
+        if: steps.report.outputs.exit_code == '3' || steps.report.outputs.exit_code == '4'
+        run: |
+          echo "The boundary manifest does not classify something upstream changed." >&2
+          echo "See the tracking issue and the step summary." >&2
+          exit 1

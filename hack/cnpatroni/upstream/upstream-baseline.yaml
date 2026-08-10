@@ -1,0 +1,63 @@
+# The recorded CloudNativePatroni fork baseline.
+#
+# This file is the single source of truth for "which upstream CloudNativePG
+# commit have we already absorbed". It is checked in rather than held in a
+# custom git ref, so that a fresh clone and a CI checkout both get it for free
+# and every change to it is visible in a pull-request diff.
+#
+# It cannot lie: `cnpatroni-upstream validate` asserts that both commits below
+# are ancestors of HEAD (checks V11 and V12) and fails otherwise.
+#
+# The prose record of the baseline, including the deviation from specification
+# section 6.1, is docs/cnpatroni/upstream-baseline.md.
+---
+schema: cnpatroni.io/upstream-baseline/v1
+
+upstream:
+  url: https://github.com/cloudnative-pg/cloudnative-pg
+  remote: upstream
+  # Upstream backports nearly everything from main onto its release branches,
+  # so main is the superset. Release branches are fetched for provenance
+  # queries only and are never merged.
+  track: main
+
+fork_base:
+  # Immutable. This never changes for the life of the fork.
+  commit: b22682115c5f3ad1bfe69bed719151d0db918e39
+  describe: v1.30.0-69-gb22682115
+  upstream_ref: refs/heads/main
+  date: "2026-08-06"
+  tag: cnpatroni-fork-base
+  spec_deviation:
+    spec_says: "v1.30.0 (4b5e244a7d031f67e025c83c1555e7726ecbbfa1)"
+    actual: "upstream/main b226821, which is v1.30.0 plus 69 upstream commits"
+    reason: >-
+      The fork was created from upstream main, not from the v1.30.0 tag. Moving
+      the baseline to the tag would mean rewriting published history, which the
+      project's git rules forbid.
+    cost: >-
+      CloudNativePatroni carries upstream changes that no released 1.30.x patch
+      contains, so it must never be described as "based on CloudNativePG
+      1.30.0". The honest phrasing is "based on the CloudNativePG 1.30
+      pre-release trunk (v1.30.0-69-gb22682115)".
+    recorded_in: docs/cnpatroni/upstream-baseline.md
+
+last_integrated:
+  # Advanced only after an integration pull request has merged, and only by a
+  # change that a human reviews.
+  commit: b22682115c5f3ad1bfe69bed719151d0db918e39
+  describe: v1.30.0-69-gb22682115
+  date: "2026-08-06"
+
+compatibility:
+  cloudnative_pg_minor: "1.30"
+  cloudnative_pg_reference_tag: v1.30.0
+  claimed: >-
+    CloudNativePG 1.30 pre-release trunk (v1.30.0-69-gb22682115). NOT any
+    released 1.30.x patch version.
+  verified_at: "2026-08-09"
+  unadopted_upstream_commits: 0
+
+# Upstream commits this fork deliberately refuses to adopt. Each one needs a
+# written reason and a named decision-maker. Empty at milestone M0.
+not_adopted: []
