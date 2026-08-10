@@ -40,6 +40,7 @@ declare -a CREATED_VOLUMES=()
 declare -a CREATED_IMAGES=()
 declare -a CREATED_DIRECTORIES=()
 declare -i CONTAINER_SEQUENCE=0
+declare -i CURRENT_TEST_ASSERTION_FAILURES=0
 declare -i FAILURES=0
 STARTED_CONTAINER=""
 
@@ -65,6 +66,7 @@ cleanup() {
 
 fail() {
   printf '%s\n' "$*" >&2
+  ((CURRENT_TEST_ASSERTION_FAILURES += 1))
   return 1
 }
 
@@ -128,16 +130,90 @@ start_test_container() {
   wait_for_leader "${container}" 120
 }
 
+test_function_passes() {
+  local test_function="$1"
+  local test_status
+
+  CURRENT_TEST_ASSERTION_FAILURES=0
+  if "${test_function}"; then
+    test_status=0
+  else
+    test_status=$?
+  fi
+
+  ((CURRENT_TEST_ASSERTION_FAILURES == 0 && test_status == 0))
+}
+
 run_test() {
   local name="$1"
   local test_function="$2"
 
-  if "${test_function}"; then
+  if test_function_passes "${test_function}"; then
     printf 'PASS %s\n' "${name}"
   else
     printf 'FAIL %s\n' "${name}"
     ((FAILURES += 1))
   fi
+}
+
+harness_fixture_first_assertion_violated() {
+  false || fail "first fixture assertion was intentionally violated"
+  true || fail "last fixture assertion unexpectedly failed"
+}
+
+harness_fixture_last_assertion_violated() {
+  true || fail "first fixture assertion unexpectedly failed"
+  false || fail "last fixture assertion was intentionally violated"
+}
+
+harness_fixture_no_assertion_violated() {
+  true || fail "first fixture assertion unexpectedly failed"
+  true || fail "last fixture assertion unexpectedly failed"
+}
+
+test_harness_enforces_every_assertion() {
+  local -i failures_before="${FAILURES}"
+  local -i first_fixture_failed=0
+  local -i last_fixture_failed=0
+  local -i passing_fixture_passed=0
+  local -i self_test_failed=0
+
+  run_test "first-assertion-violated-fixture" \
+    harness_fixture_first_assertion_violated >/dev/null 2>&1
+  if ((FAILURES == failures_before + 1)); then
+    first_fixture_failed=1
+  fi
+  FAILURES="${failures_before}"
+
+  run_test "last-assertion-violated-fixture" \
+    harness_fixture_last_assertion_violated >/dev/null 2>&1
+  if ((FAILURES == failures_before + 1)); then
+    last_fixture_failed=1
+  fi
+  FAILURES="${failures_before}"
+
+  run_test "no-assertion-violated-fixture" \
+    harness_fixture_no_assertion_violated >/dev/null 2>&1
+  if ((FAILURES == failures_before)); then
+    passing_fixture_passed=1
+  fi
+  FAILURES="${failures_before}"
+
+  CURRENT_TEST_ASSERTION_FAILURES=0
+  if ((first_fixture_failed != 1)); then
+    fail "harness passed a fixture whose first assertion failed"
+    self_test_failed=1
+  fi
+  if ((last_fixture_failed != 1)); then
+    fail "harness passed a fixture whose last assertion failed"
+    self_test_failed=1
+  fi
+  if ((passing_fixture_passed != 1)); then
+    fail "harness failed a fixture with no violated assertions"
+    self_test_failed=1
+  fi
+
+  return "${self_test_failed}"
 }
 
 test_entrypoint_ends_with_exec_patroni() {
@@ -399,6 +475,7 @@ build_images() {
 main() {
   trap cleanup EXIT
   build_images
+  run_test "harness-enforces-every-assertion" test_harness_enforces_every_assertion
   run_test "entrypoint-ends-with-exec-patroni" test_entrypoint_ends_with_exec_patroni
   run_test "patroni-is-pid-1" test_patroni_is_pid_1
   run_test "pid-1-catches-sigterm" test_pid_1_catches_sigterm
