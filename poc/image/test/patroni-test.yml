@@ -1,0 +1,69 @@
+scope: cnpatroni-contract-rw
+name: cnpatroni-contract-0
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: 127.0.0.1:8008
+  authentication:
+    username: cnpatroni_restapi
+    password: contract-restapi-password
+
+raft:
+  data_dir: /var/lib/postgresql/raft
+  self_addr: 127.0.0.1:2222
+
+bootstrap:
+  dcs:
+    ttl: 30
+    loop_wait: 10
+    retry_timeout: 10
+    maximum_lag_on_failover: 1048576
+    check_timeline: true
+    failsafe_mode: true
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        wal_level: replica
+        hot_standby: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_log_hints: "on"
+  initdb:
+    - encoding: UTF8
+    - locale: en_US.utf8
+    - data-checksums
+  pg_hba: &pg_hba
+    - local all all peer
+    - host all all 127.0.0.1/32 scram-sha-256
+    - host all all ::1/128 scram-sha-256
+    - host replication cnpatroni_replication all scram-sha-256
+    - host all cnpatroni_rewind all scram-sha-256
+    - host all all all scram-sha-256
+  post_bootstrap: /usr/local/bin/cnpatroni-post-bootstrap
+
+postgresql:
+  listen: 0.0.0.0:5432
+  connect_address: 127.0.0.1:5432
+  data_dir: /var/lib/postgresql/pgdata
+  bin_dir: /usr/lib/postgresql/18/bin
+  pgpass: /var/lib/postgresql/pgpass
+  authentication:
+    superuser:
+      username: postgres
+      password: contract-superuser-password
+    replication:
+      username: cnpatroni_replication
+      password: contract-replication-password
+    rewind:
+      username: cnpatroni_rewind
+      password: contract-rewind-password
+  parameters:
+    password_encryption: scram-sha-256
+  pg_hba: *pg_hba
+
+tags:
+  nofailover: false
+  noloadbalance: false
+  clonefrom: false
+  nosync: false

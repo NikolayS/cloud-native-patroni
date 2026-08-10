@@ -1,0 +1,396 @@
+# This manifest is exact target state for later operator generation. It is a
+# walking-skeleton stepping stone, not a substitute for the operator.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cnpatroni-poc-1
+  namespace: cnpatroni-poc
+  labels:
+    cnpatroni.io/podRole: instance
+    cnpatroni.io/cluster: cnpatroni-poc-rw
+    cnpatroni.io/instanceName: cnpatroni-poc-1
+    app.kubernetes.io/name: postgresql
+spec:
+  serviceAccountName: cnpatroni-poc-patroni
+  automountServiceAccountToken: true
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 60
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              cnpatroni.io/cluster: cnpatroni-poc-rw
+          topologyKey: kubernetes.io/hostname
+  securityContext:
+    runAsUser: 999
+    runAsGroup: 999
+    runAsNonRoot: true
+    fsGroup: 999
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: patroni
+      image: cnpatroni/patroni-postgres:18-4.1.4-poc1
+      imagePullPolicy: Never
+      # Writable root files are a walking-skeleton simplification. Enumerating
+      # and relocating Patroni and Postgres writes is follow-up image work.
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: false
+      command: ["/bin/bash", "/etc/cnpatroni/config/entrypoint.sh"]
+      ports:
+        - name: postgresql
+          containerPort: 5432
+        - name: patroni-rest
+          containerPort: 8008
+      # There is intentionally no CPU limit: throttling Patroni's heartbeat
+      # would imitate node failure. Under the shared memory limit, an OOM kill
+      # may select Postgres while Patroni remains alive; that is valid to test.
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+      env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: PATRONI_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: PATRONI_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: PATRONI_KUBERNETES_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: PATRONI_RESTAPI_CONNECT_ADDRESS
+          value: "$(POD_IP):8008"
+        - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
+          value: "$(POD_IP):5432"
+      startupProbe:
+        httpGet:
+          path: /liveness
+          port: 8008
+          scheme: HTTP
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 60
+      livenessProbe:
+        httpGet:
+          path: /liveness
+          port: 8008
+          scheme: HTTP
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 6
+      readinessProbe:
+        httpGet:
+          path: /readiness
+          port: 8008
+          scheme: HTTP
+        periodSeconds: 5
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      volumeMounts:
+        - name: pgdata
+          mountPath: /var/lib/postgresql/data
+        - name: config
+          mountPath: /etc/cnpatroni/config
+          readOnly: true
+        - name: credentials
+          mountPath: /etc/cnpatroni/credentials
+          readOnly: true
+        - name: run
+          mountPath: /run/cnpatroni
+        - name: shm
+          mountPath: /dev/shm
+  volumes:
+    - name: pgdata
+      persistentVolumeClaim:
+        claimName: cnpatroni-poc-1
+    - name: config
+      configMap:
+        name: cnpatroni-poc-config
+        defaultMode: 0555
+    - name: credentials
+      secret:
+        secretName: cnpatroni-poc-credentials
+        defaultMode: 0440
+    - name: run
+      emptyDir:
+        medium: Memory
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cnpatroni-poc-2
+  namespace: cnpatroni-poc
+  labels:
+    cnpatroni.io/podRole: instance
+    cnpatroni.io/cluster: cnpatroni-poc-rw
+    cnpatroni.io/instanceName: cnpatroni-poc-2
+    app.kubernetes.io/name: postgresql
+spec:
+  serviceAccountName: cnpatroni-poc-patroni
+  automountServiceAccountToken: true
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 60
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              cnpatroni.io/cluster: cnpatroni-poc-rw
+          topologyKey: kubernetes.io/hostname
+  securityContext:
+    runAsUser: 999
+    runAsGroup: 999
+    runAsNonRoot: true
+    fsGroup: 999
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: patroni
+      image: cnpatroni/patroni-postgres:18-4.1.4-poc1
+      imagePullPolicy: Never
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: false
+      command: ["/bin/bash", "/etc/cnpatroni/config/entrypoint.sh"]
+      ports:
+        - name: postgresql
+          containerPort: 5432
+        - name: patroni-rest
+          containerPort: 8008
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+      env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: PATRONI_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: PATRONI_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: PATRONI_KUBERNETES_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: PATRONI_RESTAPI_CONNECT_ADDRESS
+          value: "$(POD_IP):8008"
+        - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
+          value: "$(POD_IP):5432"
+      startupProbe:
+        httpGet:
+          path: /liveness
+          port: 8008
+          scheme: HTTP
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 60
+      livenessProbe:
+        httpGet:
+          path: /liveness
+          port: 8008
+          scheme: HTTP
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 6
+      readinessProbe:
+        httpGet:
+          path: /readiness
+          port: 8008
+          scheme: HTTP
+        periodSeconds: 5
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      volumeMounts:
+        - name: pgdata
+          mountPath: /var/lib/postgresql/data
+        - name: config
+          mountPath: /etc/cnpatroni/config
+          readOnly: true
+        - name: credentials
+          mountPath: /etc/cnpatroni/credentials
+          readOnly: true
+        - name: run
+          mountPath: /run/cnpatroni
+        - name: shm
+          mountPath: /dev/shm
+  volumes:
+    - name: pgdata
+      persistentVolumeClaim:
+        claimName: cnpatroni-poc-2
+    - name: config
+      configMap:
+        name: cnpatroni-poc-config
+        defaultMode: 0555
+    - name: credentials
+      secret:
+        secretName: cnpatroni-poc-credentials
+        defaultMode: 0440
+    - name: run
+      emptyDir:
+        medium: Memory
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 256Mi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cnpatroni-poc-3
+  namespace: cnpatroni-poc
+  labels:
+    cnpatroni.io/podRole: instance
+    cnpatroni.io/cluster: cnpatroni-poc-rw
+    cnpatroni.io/instanceName: cnpatroni-poc-3
+    app.kubernetes.io/name: postgresql
+spec:
+  serviceAccountName: cnpatroni-poc-patroni
+  automountServiceAccountToken: true
+  restartPolicy: Always
+  terminationGracePeriodSeconds: 60
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchLabels:
+              cnpatroni.io/cluster: cnpatroni-poc-rw
+          topologyKey: kubernetes.io/hostname
+  securityContext:
+    runAsUser: 999
+    runAsGroup: 999
+    runAsNonRoot: true
+    fsGroup: 999
+    fsGroupChangePolicy: OnRootMismatch
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: patroni
+      image: cnpatroni/patroni-postgres:18-4.1.4-poc1
+      imagePullPolicy: Never
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: false
+      command: ["/bin/bash", "/etc/cnpatroni/config/entrypoint.sh"]
+      ports:
+        - name: postgresql
+          containerPort: 5432
+        - name: patroni-rest
+          containerPort: 8008
+      resources:
+        requests:
+          cpu: 250m
+          memory: 512Mi
+        limits:
+          memory: 1Gi
+      env:
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: PATRONI_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: PATRONI_KUBERNETES_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: PATRONI_KUBERNETES_POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: PATRONI_RESTAPI_CONNECT_ADDRESS
+          value: "$(POD_IP):8008"
+        - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
+          value: "$(POD_IP):5432"
+      startupProbe:
+        httpGet:
+          path: /liveness
+          port: 8008
+          scheme: HTTP
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 60
+      livenessProbe:
+        httpGet:
+          path: /liveness
+          port: 8008
+          scheme: HTTP
+        periodSeconds: 10
+        timeoutSeconds: 5
+        failureThreshold: 6
+      readinessProbe:
+        httpGet:
+          path: /readiness
+          port: 8008
+          scheme: HTTP
+        periodSeconds: 5
+        timeoutSeconds: 5
+        successThreshold: 1
+        failureThreshold: 3
+      volumeMounts:
+        - name: pgdata
+          mountPath: /var/lib/postgresql/data
+        - name: config
+          mountPath: /etc/cnpatroni/config
+          readOnly: true
+        - name: credentials
+          mountPath: /etc/cnpatroni/credentials
+          readOnly: true
+        - name: run
+          mountPath: /run/cnpatroni
+        - name: shm
+          mountPath: /dev/shm
+  volumes:
+    - name: pgdata
+      persistentVolumeClaim:
+        claimName: cnpatroni-poc-3
+    - name: config
+      configMap:
+        name: cnpatroni-poc-config
+        defaultMode: 0555
+    - name: credentials
+      secret:
+        secretName: cnpatroni-poc-credentials
+        defaultMode: 0440
+    - name: run
+      emptyDir:
+        medium: Memory
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 256Mi

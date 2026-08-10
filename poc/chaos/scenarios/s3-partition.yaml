@@ -1,0 +1,12 @@
+name: s3-partition
+target: current-leader-node
+defaultDuration: 120s
+hardCap: 240s
+preserveOracleReachability:
+  - 5432
+  - 8008
+assertions:
+  - pessimistic-fence-before-promote-margin-positive
+  - no-dual-writable
+  - old-primary-removed-from-rw-endpoints-before-new-ack
+  - old-primary-rejoins-as-replica

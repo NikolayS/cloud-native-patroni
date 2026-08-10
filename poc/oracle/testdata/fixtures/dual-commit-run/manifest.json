@@ -1,0 +1,1 @@
+{"expected_nodes":["pod-a","pod-b","pod-c"],"description":"Positive control with two direct-Pod acknowledged writes in one round."}
