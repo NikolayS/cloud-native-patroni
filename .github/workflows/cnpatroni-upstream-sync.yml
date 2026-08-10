@@ -38,7 +38,12 @@ on:
         required: false
         default: "upstream/main"
 
-permissions: read-all
+# boundary-guard and tool-vulncheck only read the tree; divergence-report
+# re-declares its own contents: read plus issues: write, which replaces this
+# block outright. Nothing here needs read access to packages, actions or
+# security events, so the fork's two workflows declare the same floor.
+permissions:
+  contents: read
 
 defaults:
   run:
