@@ -21,6 +21,7 @@ package setup_test
 
 import (
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -225,4 +226,129 @@ func countApplied(r *setup.Result) int {
 	}
 
 	return applied
+}
+
+// driverBinary writes a stand-in for the tool's own executable, so that the
+// registration tests do not have to copy a real one.
+func driverBinary(t *testing.T) string {
+	t.Helper()
+
+	path := filepath.Join(t.TempDir(), "cnpatroni-upstream")
+	if err := os.WriteFile(path, []byte("#!/usr/bin/env bash\nexit 2\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	return path
+}
+
+func TestSetupRegistersTheBoundaryMergeDriver(t *testing.T) {
+	upstream := newUpstream(t)
+	fork := gittest.New(t)
+	fork.Write("a.go", "package a\n")
+	fork.Commit("fork")
+
+	opts := options(fork.Repo(t), "file://"+upstream.Root)
+	opts.DriverBinary = driverBinary(t)
+	if _, err := setup.Run(opts); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	name := strings.TrimSpace(fork.Git("config", "--get", "merge.cnpatroni-boundary.name"))
+	if name == "" {
+		t.Error("the merge driver was declared without a human-readable name")
+	}
+
+	driver := strings.TrimSpace(fork.Git("config", "--get", "merge.cnpatroni-boundary.driver"))
+	if !strings.Contains(driver, "merge-driver %O %A %B %L %P") {
+		t.Errorf("driver command %q does not pass git's five placeholders", driver)
+	}
+	command := strings.Fields(driver)
+	if len(command) == 0 || !filepath.IsAbs(command[0]) {
+		t.Fatalf("driver command %q must start with an absolute path", driver)
+	}
+	if info, err := os.Stat(command[0]); err != nil || info.Mode().Perm()&0o100 == 0 {
+		t.Fatalf("the registered driver %q is not an executable file: %v", command[0], err)
+	}
+
+	// The installed binary must sit outside the worktree, or every merge would
+	// start from a dirty tree.
+	if strings.HasPrefix(command[0], filepath.Join(fork.Root, "bin")) {
+		t.Errorf("the driver was installed inside the worktree: %s", command[0])
+	}
+	if status := strings.TrimSpace(fork.Git("status", "--porcelain")); status != "" {
+		t.Errorf("registering the driver dirtied the worktree:\n%s", status)
+	}
+}
+
+func TestSetupMergeDriverRegistrationIsIdempotent(t *testing.T) {
+	upstream := newUpstream(t)
+	fork := gittest.New(t)
+	fork.Write("a.go", "package a\n")
+	fork.Commit("fork")
+
+	opts := options(fork.Repo(t), "file://"+upstream.Root)
+	opts.DriverBinary = driverBinary(t)
+	if _, err := setup.Run(opts); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	second, err := setup.Run(opts)
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+
+	for _, step := range second.Steps {
+		if strings.Contains(step.Name, "merge driver") && !step.Skipped {
+			t.Errorf("the second run repeated %q", step.Name)
+		}
+	}
+}
+
+func TestDryRunDoesNotRegisterTheMergeDriver(t *testing.T) {
+	upstream := newUpstream(t)
+	fork := gittest.New(t)
+	fork.Write("a.go", "package a\n")
+	fork.Commit("fork")
+
+	opts := options(fork.Repo(t), "file://"+upstream.Root)
+	opts.DriverBinary = driverBinary(t)
+	opts.DryRun = true
+
+	result, err := setup.Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var announced bool
+	for _, step := range result.Steps {
+		if strings.Contains(step.Name, "merge driver") {
+			announced = true
+		}
+	}
+	if !announced {
+		t.Error("a dry run must still print the merge-driver steps it would take")
+	}
+
+	if _, _, err := fork.Repo(t).RunAllowFail("config", "--get", "merge.cnpatroni-boundary.driver"); err == nil {
+		t.Error("a dry run must not register the merge driver")
+	}
+}
+
+// A registration pointing at a binary that is not there is worse than none: git
+// would report every boundary merge as failed for the wrong reason.
+func TestSetupRefusesAMissingDriverBinary(t *testing.T) {
+	upstream := newUpstream(t)
+	fork := gittest.New(t)
+	fork.Write("a.go", "package a\n")
+	fork.Commit("fork")
+
+	opts := options(fork.Repo(t), "file://"+upstream.Root)
+	opts.DriverBinary = filepath.Join(t.TempDir(), "absent")
+
+	_, err := setup.Run(opts)
+	if err == nil {
+		t.Fatal("expected an error for a missing driver binary, got none")
+	}
+	if !strings.Contains(err.Error(), "absent") {
+		t.Errorf("error %q should name the missing binary", err)
+	}
 }
