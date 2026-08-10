@@ -1,9 +1,13 @@
 # Identifier and naming policy
 
-Status: accepted for milestone M0 as policy. The mechanical rename it describes
-is **not** authorised yet.
-Baseline: CloudNativePG 1.30.0.
-Last updated: 2026-08-09 23:41:44 UTC.
+Status: proposed. Nothing has accepted it: this project publishes no maintainers
+([`MAINTAINERS.md`](../../MAINTAINERS.md)), architecture decision records are the
+binding instrument ([`GOVERNANCE.md`](../../GOVERNANCE.md)), and section 4 below
+defers this policy's central open question to a naming ADR that does not exist
+yet. The mechanical rename it describes is **not** authorised in any case.
+Baseline: CloudNativePG at commit `b226821` (2026-08-06), post-1.30.0
+development on upstream `main`; the inherited version constant reads 1.30.0.
+Last updated: 2026-08-10 00:44:00 UTC.
 
 This document states which identifiers CloudNativePatroni will own, which are
 frozen until after the architecture spike, which belong to Patroni and must
@@ -179,7 +183,8 @@ implemented:
 
 ## 5. Rename inventory and checklist
 
-Counts are from the M0 identifier recon against CloudNativePG 1.30.0
+Counts are from the M0 identifier recon against the inherited tree at commit
+`b226821`
 (`grep -rniE "cloudnative-?pg|cnpg"`, excluding `.git`), and are recorded so the
 eventual rename can be reviewed against a number rather than a feeling. They are
 sizing figures, not a work order.
