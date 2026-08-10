@@ -453,6 +453,32 @@ func ShortSHA(ref string) string {
 	return ref
 }
 
+// TreeBlobs maps every file in the tree of a ref to its blob identifier. It
+// answers content questions without reading a single file: two paths hold the
+// same bytes exactly when they carry the same blob.
+func (r *Repo) TreeBlobs(ref string) (map[string]string, error) {
+	out, err := r.Run("ls-tree", "-r", "-z", ref)
+	if err != nil {
+		return nil, err
+	}
+
+	blobs := map[string]string{}
+	for _, entry := range splitNUL(out) {
+		// <mode> SP <type> SP <object> TAB <path>
+		metadata, path, found := strings.Cut(entry, "\t")
+		if !found {
+			continue
+		}
+		fields := strings.Fields(metadata)
+		if len(fields) != 3 || fields[1] != "blob" {
+			continue
+		}
+		blobs[path] = fields[2]
+	}
+
+	return blobs, nil
+}
+
 // TreePaths lists every file present in the tree of a ref.
 func (r *Repo) TreePaths(ref string) (map[string]bool, error) {
 	out, err := r.Run("ls-tree", "-r", "-z", "--name-only", ref)

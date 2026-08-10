@@ -565,6 +565,98 @@ func TestValidateReportsUndeclaredForkEdits(t *testing.T) {
 	}
 }
 
+// upstream-untouched is proved, not asserted: the gate accepts a path whose
+// bytes were already in the fork base tree, wherever they sat in it. Parking a
+// verbatim copy at a new path is the case this fork actually has.
+func TestValidateAcceptsVerbatimContentParkedAtANewPath(t *testing.T) {
+	vf := newValidateFixture(t)
+	vf.git.Write("parked/doomed.go", "package pkg\n")
+	vf.git.Remove("pkg/doomed.go")
+	vf.git.Commit("park the inherited file")
+
+	body := manifestBody(true, `  - id: park.doomed
+    ownership: upstream-untouched
+    paths: ["parked/doomed.go"]
+  - id: delete.doomed
+    ownership: deleted
+    paths: ["pkg/doomed.go"]
+`+validRules, "")
+
+	findings := vf.validate(t, body, boundary.Options{CheckDrift: true})
+	if len(findings) != 0 {
+		t.Fatalf("a verbatim copy parked at a new path is not drift, got %v", findings)
+	}
+}
+
+// The laundering case. One byte of difference and the same declaration must
+// fail, because the content is no longer upstream's.
+func TestValidateReportsEditedContentParkedAtANewPath(t *testing.T) {
+	vf := newValidateFixture(t)
+	vf.git.Write("parked/doomed.go", "package pkg\n\n// CloudNativePatroni edit.\n")
+	vf.git.Remove("pkg/doomed.go")
+	vf.git.Commit("park the inherited file with an edit")
+
+	body := manifestBody(true, `  - id: park.doomed
+    ownership: upstream-untouched
+    paths: ["parked/doomed.go"]
+  - id: delete.doomed
+    ownership: deleted
+    paths: ["pkg/doomed.go"]
+`+validRules, "")
+
+	findings := vf.validate(t, body, boundary.Options{CheckDrift: true})
+	if !hasCode(findings, "D2") {
+		t.Fatalf("codes = %v, want D2 naming parked/doomed.go", findingCodes(findings))
+	}
+	for _, f := range findings {
+		if f.Code == "D2" && !strings.Contains(f.Message, "not the bytes") {
+			t.Errorf("D2 message %q should say the content is not upstream's", f.Message)
+		}
+	}
+}
+
+// Content that was never in the fork base at all cannot be upstream-untouched,
+// however new the path is.
+func TestValidateReportsNewContentDeclaredUpstreamUntouched(t *testing.T) {
+	vf := newValidateFixture(t)
+	vf.git.Write("parked/invented.go", "package parked\n\n// Written by this fork.\n")
+	vf.git.Commit("add a file that never existed upstream")
+
+	body := manifestBody(true, `  - id: park.invented
+    ownership: upstream-untouched
+    paths: ["parked/invented.go"]
+`+validRules, "")
+
+	findings := vf.validate(t, body, boundary.Options{CheckDrift: true})
+	if !hasCode(findings, "D2") {
+		t.Fatalf("codes = %v, want D2 naming parked/invented.go", findingCodes(findings))
+	}
+}
+
+// Removing an inherited file is a change no upstream-untouched rule explains
+// either; the honest declaration is deleted.
+func TestValidateReportsRemovalDeclaredUpstreamUntouched(t *testing.T) {
+	vf := newValidateFixture(t)
+	vf.git.Remove("pkg/doomed.go")
+	vf.git.Commit("remove an inherited file")
+
+	body := manifestBody(true, `  - id: keep.doomed
+    ownership: upstream-untouched
+    state: present
+    paths: ["pkg/doomed.go"]
+`+validRules, "")
+
+	findings := vf.validate(t, body, boundary.Options{CheckDrift: true})
+	if !hasCode(findings, "D2") {
+		t.Fatalf("codes = %v, want D2 naming pkg/doomed.go", findingCodes(findings))
+	}
+	for _, f := range findings {
+		if f.Code == "D2" && !strings.Contains(f.Message, "removed") {
+			t.Errorf("D2 message %q should say the path was removed", f.Message)
+		}
+	}
+}
+
 // Declaring a fork-edited path under a specific upstream-untouched rule must
 // not launder it past the gate. The rule promises the file is upstream's, so a
 // change to it is drift however precisely the rule names it.

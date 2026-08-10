@@ -567,7 +567,8 @@ func validateBaseline(opts Options) []Finding {
 // Matching a specific rule is not on its own an explanation. An
 // upstream-untouched rule states that the file is upstream's verbatim, so
 // suppressing the finding for it would let any fork edit be laundered past the
-// gate simply by naming the path.
+// gate simply by naming the path. That class is therefore proved rather than
+// believed, against the content of the fork base.
 func checkDrift(m *Manifest, opts Options) ([]Finding, error) {
 	changes, err := opts.Repo.ChangedFiles(opts.Baseline.ForkBase.Commit, "HEAD")
 	if err != nil {
@@ -575,6 +576,7 @@ func checkDrift(m *Manifest, opts Options) ([]Finding, error) {
 	}
 
 	var findings []Finding
+	var verbatimClaims []FileClaim
 	for _, change := range changes {
 		rule := m.Match(change.Path)
 		switch {
@@ -588,12 +590,36 @@ func checkDrift(m *Manifest, opts Options) ([]Finding, error) {
 				Severity: SeverityUndeclared,
 			})
 		case ownershipExplainsChange(rule, change.Path, opts.Repo.Root):
+		case rule.Ownership == OwnershipUpstreamUntouched:
+			// Deferred: the content check needs one pass over two trees, so it
+			// runs once for every claim rather than once per path.
+			verbatimClaims = append(verbatimClaims, FileClaim{Path: change.Path, Rule: rule})
 		default:
 			findings = append(findings, Finding{
 				Code:     "D2",
 				RuleID:   rule.ID,
 				Path:     change.Path,
 				Message:  misdeclaredMessage(rule),
+				Severity: SeverityUndeclared,
+			})
+		}
+	}
+
+	if len(verbatimClaims) > 0 {
+		content, contentErr := newForkBaseContent(opts.Repo, opts.Baseline.ForkBase.Commit)
+		if contentErr != nil {
+			return nil, contentErr
+		}
+		for _, claim := range verbatimClaims {
+			present, verbatim := content.holds(claim.Path)
+			if verbatim {
+				continue
+			}
+			findings = append(findings, Finding{
+				Code:     "D2",
+				RuleID:   claim.Rule.ID,
+				Path:     claim.Path,
+				Message:  unverifiedMessage(present),
 				Severity: SeverityUndeclared,
 			})
 		}
@@ -611,8 +637,58 @@ func checkDrift(m *Manifest, opts Options) ([]Finding, error) {
 	return findings, nil
 }
 
+// FileClaim is a path whose declared class still has to be proved.
+type FileClaim struct {
+	Path string
+	Rule *Rule
+}
+
+// forkBaseContent answers whether a path at HEAD holds bytes that were already
+// in the fork base tree, wherever they sat in it. The question is content
+// identity, not path identity: a verbatim copy parked at a new path is still
+// upstream's bytes, while an edit to a file kept at its old path is not, and
+// no line of the manifest can change either answer. That is what makes
+// upstream-untouched a measurement rather than a promise.
+type forkBaseContent struct {
+	head map[string]string
+	base map[string]bool
+}
+
+func newForkBaseContent(repo *gitx.Repo, forkBase string) (*forkBaseContent, error) {
+	head, err := repo.TreeBlobs("HEAD")
+	if err != nil {
+		return nil, err
+	}
+	baseBlobs, err := repo.TreeBlobs(forkBase)
+	if err != nil {
+		return nil, err
+	}
+
+	base := make(map[string]bool, len(baseBlobs))
+	for _, blob := range baseBlobs {
+		base[blob] = true
+	}
+
+	return &forkBaseContent{head: head, base: base}, nil
+}
+
+// holds reports whether the path exists at HEAD, and whether its content came
+// from the fork base. A path the fork removed is present: false, and a path
+// whose bytes are not in the fork base tree is verbatim: false. Absence of
+// proof is drift.
+func (c *forkBaseContent) holds(path string) (present, verbatim bool) {
+	blob, present := c.head[path]
+	if !present {
+		return false, false
+	}
+
+	return true, c.base[blob]
+}
+
 // ownershipExplainsChange reports whether the ownership class a rule declares
-// legitimately accounts for the path differing from the fork base.
+// legitimately accounts for the path differing from the fork base. It answers
+// only for the classes that need no evidence beyond the worktree;
+// upstream-untouched is settled against the fork base content instead.
 func ownershipExplainsChange(rule *Rule, path, root string) bool {
 	switch rule.Ownership {
 	case OwnershipAdapted, OwnershipDisabled, OwnershipCNPatroniOwned:
@@ -630,17 +706,28 @@ func ownershipExplainsChange(rule *Rule, path, root string) bool {
 	}
 }
 
-func misdeclaredMessage(rule *Rule) string {
-	switch rule.Ownership {
-	case OwnershipDeleted:
-		return "changed in this fork and declared deleted, but the path is still present in the worktree"
-	case OwnershipUpstreamUntouched:
-		return "changed in this fork but declared upstream-untouched, which promises the file is " +
-			"upstream's verbatim; restore the upstream content, or reclassify the path"
-	default:
-		return fmt.Sprintf("changed in this fork but declared %s, which does not account for a change",
-			rule.Ownership)
+// unverifiedMessage names which half of the upstream-untouched claim failed,
+// because a path holding bytes this fork wrote is a different problem from a
+// path this fork removed.
+func unverifiedMessage(present bool) string {
+	if !present {
+		return "removed in this fork but declared upstream-untouched; declare it deleted, " +
+			"or restore the file"
 	}
+
+	return "declared upstream-untouched but holds content that is not the bytes it had at the fork base; " +
+		"restore the upstream content, or reclassify the path"
+}
+
+func misdeclaredMessage(rule *Rule) string {
+	if rule.Ownership == OwnershipDeleted {
+		return "changed in this fork and declared deleted, but the path is still present in the worktree"
+	}
+
+	// Reached only by an ownership class this tool does not know, which V0
+	// already reports as an error.
+	return fmt.Sprintf("changed in this fork but declared %s, which does not account for a change",
+		rule.Ownership)
 }
 
 // RemediationFor renders the copy-pasteable remedy printed after drift
@@ -670,7 +757,10 @@ func RemediationFor(manifestPath string, findings []Finding) string {
 			b.WriteString("\n")
 		}
 		fmt.Fprintf(&b,
-			"%d file(s) changed in this fork are declared in %s under a rule that promises no change:\n\n%s\n\n"+
+			"%d file(s) changed in this fork do not hold the content their rule in %s claims:\n\n%s\n\n"+
+				"These are declared under a rule that promises no change. upstream-untouched is\n"+
+				"proved against the fork base, not asserted: a path is clean only while it holds\n"+
+				"bytes that were already in the fork base tree, wherever they sat in it.\n"+
 				"Restore the upstream content, or reclassify each path as adapted, disabled,\n"+
 				"cnpatroni-owned or deleted, %s",
 			len(misdeclared), manifestPath, strings.Join(misdeclared, "\n"), rerun)

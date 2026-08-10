@@ -324,6 +324,53 @@ func TestRequireCompleteHistoryDetectsShallowClone(t *testing.T) {
 	}
 }
 
+func TestTreeBlobsIdentifiesContentAcrossPaths(t *testing.T) {
+	f := gittest.New(t)
+	f.Write("pkg/a.go", "package a\n")
+	f.Write("pkg/b.go", "package b\n")
+	base := f.Commit("base")
+
+	// The same bytes at a new path, and an edit at the old one.
+	f.Write("parked/a.go", "package a\n")
+	f.Remove("pkg/a.go")
+	f.Write("pkg/b.go", "package b\n\n// edited\n")
+	f.Commit("park one file and edit the other")
+
+	repo := f.Repo(t)
+	baseBlobs, err := repo.TreeBlobs(base)
+	if err != nil {
+		t.Fatalf("TreeBlobs(base): %v", err)
+	}
+	headBlobs, err := repo.TreeBlobs("HEAD")
+	if err != nil {
+		t.Fatalf("TreeBlobs(HEAD): %v", err)
+	}
+
+	if len(baseBlobs) != 2 {
+		t.Errorf("base tree has %d blobs, want 2: %v", len(baseBlobs), baseBlobs)
+	}
+	if headBlobs["parked/a.go"] != baseBlobs["pkg/a.go"] {
+		t.Errorf("a verbatim move changed the blob: %q != %q",
+			headBlobs["parked/a.go"], baseBlobs["pkg/a.go"])
+	}
+	if headBlobs["pkg/b.go"] == baseBlobs["pkg/b.go"] {
+		t.Error("an edited file kept its blob")
+	}
+	if _, present := headBlobs["pkg/a.go"]; present {
+		t.Error("a removed path is still listed at HEAD")
+	}
+}
+
+func TestTreeBlobsRejectsAnUnknownRef(t *testing.T) {
+	f := gittest.New(t)
+	f.Write("a.go", "package a\n")
+	f.Commit("base")
+
+	if _, err := f.Repo(t).TreeBlobs("no-such-ref"); err == nil {
+		t.Fatal("expected an error for a ref that does not exist")
+	}
+}
+
 func TestMergeTreeConflictsFindsOverlappingEdit(t *testing.T) {
 	f := gittest.New(t)
 	f.Write("shared.go", "package shared\n\nconst V = 1\n")
