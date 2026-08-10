@@ -237,15 +237,14 @@ test_entrypoint_ends_with_exec_patroni() {
 test_patroni_is_pid_1() {
   local c
   local cmdline
-  local comm
   local forbidden
 
   start_test_container "pid1"
   c="${STARTED_CONTAINER}"
-  comm="$(docker exec "${c}" cat /proc/1/comm)"
-  # comm is the executable basename until Patroni calls setproctitle, so either value is correct;
-  # PID 1 identity is asserted unambiguously by cmdline below.
-  [[ "${comm}" == "patroni" || "${comm}" == "python3" ]] || fail "PID 1 comm was ${comm}"
+  # This contract deliberately does not assert /proc/1/comm. exec patroni runs a Python
+  # interpreter, so the kernel sets comm from that binary's basename, and Patroni retitles
+  # itself with setproctitle shortly afterwards. The value is unreliable by construction
+  # because it depends on when it is read; /proc/1/cmdline asserts identity unambiguously.
   cmdline="$(docker exec "${c}" sh -c "tr '\\0' ' ' < /proc/1/cmdline")"
   [[ "${cmdline}" == *"/etc/cnpatroni/patroni.yml " ]] ||
     fail "PID 1 command line did not end with the test configuration path: ${cmdline}"
