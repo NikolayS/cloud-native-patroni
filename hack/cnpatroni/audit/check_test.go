@@ -610,6 +610,7 @@ func TestBaselineWriteRoundTripsExactData(t *testing.T) {
 	res := result(findings)
 	rules := ruleSet("role.primary", "proc.promote")
 	baseline := BuildBaseline(rules, res, findings, 0, "abc123", "2026-08-09 23:20:00 UTC")
+	baseline.ForkBase = "fork-base-123"
 	path := filepath.Join(t.TempDir(), "baseline.yaml")
 
 	if err := baseline.Write(path); err != nil {
@@ -627,8 +628,10 @@ func TestBaselineWriteRoundTripsExactData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadBaseline: %v", err)
 	}
-	if loaded.GeneratedFrom != "abc123" || loaded.GeneratedAt != "2026-08-09 23:20:00 UTC" {
-		t.Errorf("provenance = %q at %q", loaded.GeneratedFrom, loaded.GeneratedAt)
+	if loaded.ForkBase != "fork-base-123" || loaded.GeneratedFrom != "abc123" ||
+		loaded.GeneratedAt != "2026-08-09 23:20:00 UTC" {
+		t.Errorf("fork base = %q, regeneration = %q at %q",
+			loaded.ForkBase, loaded.GeneratedFrom, loaded.GeneratedAt)
 	}
 	if loaded.Total != 2 || loaded.TotalsByRule["proc.promote"] != 1 ||
 		loaded.TotalsByRule["role.primary"] != 1 {
@@ -638,6 +641,19 @@ func TestBaselineWriteRoundTripsExactData(t *testing.T) {
 		loaded.Buckets[0].Symbol != "pkg.A" || loaded.Buckets[1].Rule != "role.primary" ||
 		loaded.Buckets[1].Symbol != "pkg.B" {
 		t.Errorf("loaded buckets = %+v, want deterministic rule and symbol order", loaded.Buckets)
+	}
+}
+
+func TestLoadBaselineAllowsAbsentForkBase(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "baseline.yaml")
+	writeFile(t, path, emptyAuthorityBaseline)
+
+	loaded, err := LoadBaseline(path)
+	if err != nil {
+		t.Fatalf("LoadBaseline rejected an absent fork_base: %v", err)
+	}
+	if loaded.ForkBase != "" {
+		t.Errorf("absent fork_base loaded as %q, want empty", loaded.ForkBase)
 	}
 }
 

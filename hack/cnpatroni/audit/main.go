@@ -307,6 +307,11 @@ func runBaseline(o *options) int {
 			baseline.Total, len(baseline.Buckets))
 		return exitClean
 	}
+	forkBase, err := loadForkBase(o.root)
+	if err != nil {
+		return toolError(err)
+	}
+	baseline.ForkBase = forkBase
 	if err := baseline.Write(o.baseline); err != nil {
 		return toolError(err)
 	}
@@ -372,8 +377,9 @@ func nowUTC() string {
 	return time.Now().UTC().Format("2006-01-02 15:04:05 UTC")
 }
 
-// headCommit records which tree the baseline was taken from. A repository
-// without git still produces a usable baseline; the field simply says so.
+// headCommit records which tree the baseline was last regenerated from. A
+// repository without git still produces a usable baseline; the freshness field
+// simply says so.
 func headCommit(root string) string {
 	out, err := exec.Command("git", "-C", root, "rev-parse", "HEAD").Output()
 	if err != nil {

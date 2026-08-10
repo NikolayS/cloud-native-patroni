@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -534,6 +535,133 @@ func TestBaselineCompareCommandMapsGrowthOntoExitCodes(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestBaselineWriterReadsForkBaseInsteadOfHead(t *testing.T) {
+	forkBase := "1111111111111111111111111111111111111111"
+	args, baselinePath, head := baselineWriterFixture(t, "fork_base:\n  commit: "+forkBase+"\n")
+
+	code, stdout, stderr := captureRun(t, args)
+	if code != exitClean {
+		t.Fatalf("exit code = %d, want %d\nstdout: %s\nstderr: %s", code, exitClean, stdout, stderr)
+	}
+	written, err := LoadBaseline(baselinePath)
+	if err != nil {
+		t.Fatalf("LoadBaseline: %v", err)
+	}
+	if written.ForkBase != forkBase {
+		t.Errorf("written fork base = %q, want source value %q", written.ForkBase, forkBase)
+	}
+	if written.ForkBase == head {
+		t.Errorf("written fork base = HEAD %q, want immutable source value", head)
+	}
+	if written.GeneratedFrom != head {
+		t.Errorf("generated from = %q, want HEAD %q", written.GeneratedFrom, head)
+	}
+}
+
+func TestBaselineWriterRejectsUnavailableForkBase(t *testing.T) {
+	empty := "fork_base:\n  commit: \"\"\n"
+	malformed := "fork_base: [\n"
+	cases := []struct {
+		name             string
+		upstreamBaseline *string
+	}{
+		{name: "missing"},
+		{name: "malformed", upstreamBaseline: &malformed},
+		{name: "empty commit", upstreamBaseline: &empty},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			args, baselinePath, _ := baselineWriterFixture(t, valueOrEmpty(tc.upstreamBaseline))
+			if tc.upstreamBaseline == nil {
+				upstreamPath := filepath.Join(filepath.Dir(baselinePath), "hack", "cnpatroni", "upstream",
+					"upstream-baseline.yaml")
+				if err := os.Remove(upstreamPath); err != nil {
+					t.Fatalf("remove upstream baseline fixture: %v", err)
+				}
+			}
+
+			code, stdout, stderr := captureRun(t, args)
+			if code != exitToolError {
+				t.Errorf("exit code = %d, want %d\nstdout: %s\nstderr: %s", code, exitToolError, stdout, stderr)
+			}
+			if !strings.Contains(stderr, "hack/cnpatroni/upstream/upstream-baseline.yaml") ||
+				!strings.Contains(stderr, "fork_base.commit") {
+				t.Errorf("error does not name the source file and field: %q", stderr)
+			}
+			if _, err := os.Stat(baselinePath); !os.IsNotExist(err) {
+				t.Errorf("failed write left baseline at %s: %v", baselinePath, err)
+			}
+		})
+	}
+}
+
+func baselineWriterFixture(t *testing.T, upstreamBaseline string) (args []string, baselinePath, head string) {
+	t.Helper()
+
+	root := t.TempDir()
+	upstreamDir := filepath.Join(root, "hack", "cnpatroni", "upstream")
+	if err := os.MkdirAll(upstreamDir, 0o700); err != nil {
+		t.Fatalf("create upstream fixture directory: %v", err)
+	}
+	writeFile(t, filepath.Join(root, "go.mod"), "module example.com/fork\n\ngo 1.26.5\n")
+	writeFile(t, filepath.Join(root, "fixture.go"), "package fixture\n\nconst marker = \"fixture\"\n")
+	writeFile(t, filepath.Join(root, "rules.yaml"), `schema: cnpatroni-authority-rules/v1
+module: example.com/fork
+scope:
+  roots: [.]
+  exclude_generated: true
+  include_tests: false
+rules:
+  - id: fixture.observe
+    severity: observe
+    spec: test
+    message: fixture marker
+    literals: [never-match]
+`)
+	writeFile(t, filepath.Join(root, "classification.yaml"), `schema: cnpatroni-authority-classification/v1
+defaults:
+  owner: test
+entries: []
+`)
+	writeFile(t, filepath.Join(upstreamDir, "upstream-baseline.yaml"), upstreamBaseline)
+
+	runGitFixture(t, root, "init", "-q")
+	runGitFixture(t, root, "add", ".")
+	runGitFixture(t, root, "-c", "user.name=Test", "-c", "user.email=test@example.com",
+		"-c", "commit.gpgsign=false", "commit", "--no-verify", "-qm", "fixture")
+	head = headCommit(root)
+	if head == "unknown" {
+		t.Fatal("temporary repository has no HEAD")
+	}
+
+	baselinePath = filepath.Join(root, "written-baseline.yaml")
+	args = []string{
+		"baseline", "--write",
+		"--root", root,
+		"--rules", filepath.Join(root, "rules.yaml"),
+		"--classification", filepath.Join(root, "classification.yaml"),
+		"--baseline", baselinePath,
+	}
+	return args, baselinePath, head
+}
+
+func runGitFixture(t *testing.T, root string, args ...string) {
+	t.Helper()
+
+	command := exec.Command("git", append([]string{"-C", root}, args...)...)
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("git %s: %v: %s", strings.Join(args, " "), err, out)
+	}
+}
+
+func valueOrEmpty(value *string) string {
+	if value == nil {
+		return "fork_base:\n  commit: fixture\n"
+	}
+	return *value
 }
 
 func TestHeadCommitReportsUnknownWhenGitIsAbsent(t *testing.T) {
