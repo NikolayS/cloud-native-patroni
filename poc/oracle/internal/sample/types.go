@@ -75,7 +75,3 @@ func ParsePatroni(raw []byte) PatroniView {
 	}
 	return view
 }
-
-// StaleCandidate marks Kubernetes Pod status as non-evidence whenever its node
-// is partitioned. The API timestamp cannot make a partitioned kubelet current.
-func StaleCandidate(nodePartitioned bool, _ time.Time) bool { return nodePartitioned }

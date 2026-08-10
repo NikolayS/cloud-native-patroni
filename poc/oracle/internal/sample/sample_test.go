@@ -21,7 +21,6 @@ package sample
 
 import (
 	"testing"
-	"time"
 )
 
 func TestParsePatroniPreservesRawAndUnknownFields(t *testing.T) {
@@ -49,14 +48,5 @@ func TestParsePatroniInvalidJSON(t *testing.T) {
 	got := ParsePatroni([]byte(`not-json`))
 	if got.OK || got.Error == "" || string(got.Raw) != "not-json" {
 		t.Fatalf("ParsePatroni() = %#v", got)
-	}
-}
-
-func TestPodStatusStaleCandidate(t *testing.T) {
-	if !StaleCandidate(true, time.Now()) {
-		t.Fatal("StaleCandidate(partitioned) = false, want true")
-	}
-	if StaleCandidate(false, time.Now()) {
-		t.Fatal("StaleCandidate(connected) = true, want false")
 	}
 }

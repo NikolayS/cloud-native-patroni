@@ -25,9 +25,8 @@ import (
 )
 
 func TestSQLAllowlist(t *testing.T) {
-	statements := Statements()
 	if len(statements) != 19 {
-		t.Fatalf("Statements() has %d entries, want 19", len(statements))
+		t.Fatalf("the SQL inventory has %d entries, want 19", len(statements))
 	}
 	for name, statement := range statements {
 		if err := ValidateSQL(statement.SQL); err != nil {
@@ -45,7 +44,7 @@ func TestSQLAllowlist(t *testing.T) {
 			}
 		}
 	}
-	if got := Statements()["canonical_insert"].SQL; got != CanonicalInsert {
+	if got := statements["canonical_insert"].SQL; got != CanonicalInsert {
 		t.Fatalf("canonical statement changed:\n%s", got)
 	}
 	if err := ValidateSQL("select now()"); err == nil {
@@ -57,7 +56,7 @@ func TestSQLAllowlist(t *testing.T) {
 }
 
 func TestForbiddenAuthorityStatementsAbsent(t *testing.T) {
-	for name, statement := range Statements() {
+	for name, statement := range statements {
 		lower := strings.ToLower(statement.SQL)
 		for _, forbidden := range []string{"pg_ctl", "pg_rewind", "standby.signal", "primary_conninfo", "primary_slot_name", "synchronous_standby_names", "promote"} {
 			if strings.Contains(lower, forbidden) {

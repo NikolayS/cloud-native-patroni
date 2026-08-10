@@ -25,8 +25,10 @@ IFS=$'\n\t'
 # topology are identical. The Kubernetes DCS, selectorless write Service, and Endpoints object are
 # proven by the manifests track on kind, not by this bare-container harness.
 
-readonly TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-readonly IMAGE_DIR="$(cd -- "${TEST_DIR}/.." && pwd)"
+TEST_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+readonly TEST_DIR
+IMAGE_DIR="$(cd -- "${TEST_DIR}/.." && pwd)"
+readonly IMAGE_DIR
 readonly RUN_ID="${$}"
 readonly PROD_IMAGE="cnpatroni-postgres:18.4-patroni-4.1.4-contract-${RUN_ID}"
 readonly TEST_IMAGE="cnpatroni-postgres-test:18.4-patroni-4.1.4-contract-${RUN_ID}"
