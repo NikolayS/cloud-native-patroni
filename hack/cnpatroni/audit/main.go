@@ -47,6 +47,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -121,7 +122,7 @@ func parseFlags(command string, args []string) (*options, error) {
 		"ignored generated audit document, relative to the repository root")
 	fs.StringVar(&opts.mapOut, "map-out", "docs/cnpatroni/responsibility-map.md",
 		"ignored generated responsibility map, relative to the repository root")
-	fs.StringVar(&opts.format, "format", "text", "text, github or json")
+	fs.StringVar(&opts.format, "format", "text", "text, github or json (check: text or github)")
 	fs.StringVar(&opts.milestone, "milestone", "M0", "current milestone, for allowlist expiry")
 	fs.BoolVar(&opts.write, "write", false, "baseline: rewrite the recorded baseline")
 	fs.StringVar(&opts.compare, "compare", "", "baseline: compare against this recorded baseline")
@@ -129,6 +130,12 @@ func parseFlags(command string, args []string) (*options, error) {
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
+	}
+	// An unrecognised milestone would make every `until:` check unreachable, so
+	// a typo would disable the whole allowlist-expiry gate in silence.
+	if _, known := milestoneOrder[opts.milestone]; !known {
+		return nil, fmt.Errorf("unknown milestone %q, want one of %s",
+			opts.milestone, strings.Join(milestoneNames(), ", "))
 	}
 	return opts, nil
 }
@@ -179,6 +186,10 @@ func printFindings(format string, res *ScanResult) int {
 }
 
 func runCheck(o *options) int {
+	if o.format != "text" && o.format != "github" {
+		return toolError(fmt.Errorf("unknown format %q, want text or github", o.format))
+	}
+
 	rules, res, err := o.load()
 	if err != nil {
 		return toolError(err)
@@ -194,12 +205,7 @@ func runCheck(o *options) int {
 
 	report := Check(rules, res, cls, baseline, o.milestone)
 
-	for _, v := range report.Violations {
-		fmt.Fprintln(os.Stderr, v)
-	}
-	for _, h := range report.Hygiene {
-		fmt.Fprintln(os.Stderr, h)
-	}
+	printReport(o.format, report)
 	fmt.Printf("authority audit: %d findings, %d classified symbols, %d violations, %d hygiene notes\n",
 		len(res.Findings), len(cls.Entries), len(report.Violations), len(report.Hygiene))
 
@@ -211,6 +217,67 @@ func runCheck(o *options) int {
 	default:
 		return exitClean
 	}
+}
+
+// printReport writes what the gate found. The github format exists because the
+// authority-audit workflow frames the output as pull-request feedback: a
+// violation printed as a plain line annotates nothing, so nobody sees it on the
+// diff that introduced it. Annotations go to standard output, as they do for
+// scan, because that is the stream the runner is documented to parse.
+func printReport(format string, report Report) {
+	if format == "github" {
+		for _, v := range report.Violations {
+			fmt.Println(githubAnnotation("error", v))
+		}
+		for _, h := range report.Hygiene {
+			fmt.Println(githubAnnotation("warning", h))
+		}
+
+		return
+	}
+
+	for _, v := range report.Violations {
+		fmt.Fprintln(os.Stderr, v)
+	}
+	for _, h := range report.Hygiene {
+		fmt.Fprintln(os.Stderr, h)
+	}
+}
+
+// A check message starts with the location of the code it is about, when there
+// is one: either path:line:col or, for a whole-symbol finding, path.
+var (
+	messageLineAndColumn = regexp.MustCompile(`^([^\s:]+):(\d+):(\d+): `)
+	messagePath          = regexp.MustCompile(`^([^\s:]+\.[A-Za-z0-9]+): `)
+)
+
+// A workflow command is one line, so the message body has to be escaped;
+// property values additionally escape the separators of the property list.
+var (
+	annotationBodyEscaper     = strings.NewReplacer("%", "%25", "\r", "%0D", "\n", "%0A")
+	annotationPropertyEscaper = strings.NewReplacer(
+		"%", "%25", "\r", "%0D", "\n", "%0A", ":", "%3A", ",", "%2C")
+)
+
+// githubAnnotation renders one message as a GitHub workflow command, lifting
+// the location out of the text and into the properties that place the
+// annotation on the diff.
+func githubAnnotation(level, message string) string {
+	properties, body := "", message
+	switch {
+	case messageLineAndColumn.MatchString(message):
+		m := messageLineAndColumn.FindStringSubmatch(message)
+		properties = fmt.Sprintf(" file=%s,line=%s,col=%s",
+			annotationPropertyEscaper.Replace(m[1]), m[2], m[3])
+		body = message[len(m[0]):]
+	case messagePath.MatchString(message):
+		m := messagePath.FindStringSubmatch(message)
+		properties = " file=" + annotationPropertyEscaper.Replace(m[1])
+		body = message[len(m[0]):]
+	}
+
+	return fmt.Sprintf("::%s%s::%s", level, properties,
+		annotationBodyEscaper.Replace(strings.TrimRight(body, "\n")))
 }
 
 func runBaseline(o *options) int {

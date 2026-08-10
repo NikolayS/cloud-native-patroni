@@ -21,6 +21,7 @@ package cli_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,7 @@ import (
 
 	"github.com/postgres-ai/cnpatroni-upstream/internal/cli"
 	"github.com/postgres-ai/cnpatroni-upstream/internal/gittest"
+	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
 )
 
 const cliManifest = `schema: cnpatroni.io/boundary/v1
@@ -335,6 +337,11 @@ func TestCLIGitAttributesCheckRejectsAStaleFile(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "gitattributes") {
 		t.Errorf("stderr should name the command that regenerates the file: %q", stderr)
+	}
+	// The hint has to be runnable: this tool is a separate Go module, so the
+	// bare `go run ./hack/...` form fails from the repository root.
+	if !strings.Contains(stderr, fmt.Sprintf(gitx.ToolInvocation, "gitattributes")) {
+		t.Errorf("stderr should carry the runnable invocation: %q", stderr)
 	}
 }
 
