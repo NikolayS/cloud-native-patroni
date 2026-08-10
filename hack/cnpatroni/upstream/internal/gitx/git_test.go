@@ -21,6 +21,7 @@ package gitx_test
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
 	"testing"
 
