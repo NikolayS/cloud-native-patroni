@@ -43,8 +43,13 @@ env:
   BUILD_PUSH_PROVENANCE: ""
   BUILD_PUSH_CACHE_FROM: ""
   BUILD_PUSH_CACHE_TO: ""
-  BUILD_PLUGIN_RELEASE_ARGS: "build --skip=validate --clean --id kubectl-cnpg --timeout 60m"
-  BUILD_MANAGER_RELEASE_ARGS: "build --skip=validate --clean --id manager-race"
+  # CloudNativePatroni: --snapshot added. GoReleaser refuses to build a repository with
+  # no tags ("git doesn't contain any tags - either add a tag or use --snapshot"), and
+  # this fork has none. Snapshot mode resolves the version from
+  # .goreleaser.yml's snapshot.version_template instead. These are CI builds, never a
+  # release; the release path is parked in .github/workflows-upstream/release-publish.yml.
+  BUILD_PLUGIN_RELEASE_ARGS: "build --skip=validate --snapshot --clean --id kubectl-cnpg --timeout 60m"
+  BUILD_MANAGER_RELEASE_ARGS: "build --skip=validate --snapshot --clean --id manager-race"
   REPOSITORY_OWNER: "cloudnative-pg"
   REGISTRY: "ghcr.io"
   REGISTRY_USER: ${{ github.actor }}
@@ -511,16 +516,20 @@ jobs:
 
           # use git describe to get the nearest tag and use that to build the version (e.g. 1.4.0-dev24 or 1.4.0)
           #
-          # CloudNativePatroni: this fork carries no v* tags, so `git describe` exits 128
-          # with "fatal: No names found" and, under `pipefail`, failed the whole job before
-          # anything was built. Fall back to the CNPATRONI_VERSION file when the version
-          # track has added it, and to a commit-count development version otherwise, so the
-          # container build never depends on upstream release tags this fork does not have.
-          if describe_out=$(git describe --tags --match 'v*' "${commit_sha}" 2>/dev/null); then
-            commit_version=$(printf '%s' "${describe_out}" | sed -e 's/^v//; s/-g[0-9a-f]\+$//; s/-\([0-9]\+\)$/-dev\1/')
-          elif [[ -s CNPATRONI_VERSION ]]; then
-            commit_version=$(tr -d '[:space:]' < CNPATRONI_VERSION)
+          # CloudNativePatroni: this fork carries no upstream v* tags of its own — it
+          # fetches them but never pushes them — so the inherited `git describe --tags
+          # --match 'v*'` exits 128 with "fatal: No names found" and, under `pipefail`,
+          # failed the whole job before anything was built. The fork tag prefix is
+          # cnpatroni-v*; until the first such tag exists the version comes from
+          # CNPATRONI_VERSION in the Makefile, which is the single place the fork version
+          # is declared. The last resort keeps the value non-empty even if that line is
+          # ever renamed, because an empty version silently mislabels every artefact.
+          if describe_out=$(git describe --tags --match 'cnpatroni-v*' "${commit_sha}" 2>/dev/null); then
+            commit_version=$(printf '%s' "${describe_out}" | sed -e 's/^cnpatroni-v//; s/-g[0-9a-f]\+$//; s/-\([0-9]\+\)$/-dev\1/')
           else
+            commit_version=$(sed -n 's/^CNPATRONI_VERSION[[:space:]]*?=[[:space:]]*//p' Makefile | head -n 1)
+          fi
+          if [[ -z "${commit_version}" ]]; then
             commit_version="0.0.0-dev.$(git rev-list --count "${commit_sha}")"
           fi
 
