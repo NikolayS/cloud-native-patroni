@@ -24,12 +24,13 @@ Owner directive D-1 states:
 
 ## The mark
 
-The mark is a masonry arch of three voussoirs. The two flanking stones and their
-piers form the structure; the single stone at the crown is the keystone, drawn
-in the brand primary and projecting one unit beyond the arch face. An arch
-admits exactly one keystone: remove it and the structure fails, and no arch can
-have two. That is a direct expression of the project's single high-availability
-authority rule.
+The mark is a masonry arch of three voussoirs. The flanking stones bear against
+the keystone's radial sides and hold it at the crown; if that mutual support is
+withdrawn, the keystone falls. This represents the leader-lock model, in which
+a leader holds write authority only while its peers' agreement holds it there.
+An arch also admits exactly one keystone, so a second authority is structurally
+impossible. The keystone is drawn in the brand primary and projects one unit
+beyond the arch face.
 
 The mark is flat, three closed paths, no gradient, no raster, no font, no
 mascot, no enclosing tile.
@@ -47,16 +48,17 @@ All coordinates are on a 24 × 24 unit grid, expressed directly as the SVG
 | Outer radius of flanking voussoirs | 10 |
 | Inner radius of the arch opening | 6 |
 | Outer radius of the keystone | 11 (projects 1 unit past the arch face) |
-| Arch band thickness | 4 units |
+| Flanking arch band thickness | 4 units |
+| Keystone radial depth | 5 units |
 | Pier width | 4 units, x from 2 to 6 and from 18 to 22 |
 | Pier height | 9 units, y from 13 to 22 |
 | Springing line | y = 13 |
 | Baseline | y = 22 |
-| Left voussoir angular span | 180 degrees to 118 degrees |
-| Seam | 118 degrees to 112 degrees (6 degrees) |
+| Left voussoir angular span | 180 degrees to 113.432432 degrees |
+| Joint | 113.432432 degrees to 112 degrees (1.432432 degrees; 0.25 units at radius 10) |
 | Keystone angular span | 112 degrees to 68 degrees (44 degrees, symmetric about the vertical) |
-| Seam | 68 degrees to 62 degrees (6 degrees) |
-| Right voussoir angular span | 62 degrees to 0 degrees |
+| Joint | 68 degrees to 66.567568 degrees (1.432432 degrees; 0.25 units at radius 10) |
+| Right voussoir angular span | 66.567568 degrees to 0 degrees |
 | Corner treatment | none — all corners square, no rounding anywhere |
 
 Angles are measured counter-clockwise from the positive x axis in the ordinary
@@ -65,19 +67,24 @@ authoritative:
 
 ```text
 left pier and voussoir:
-M2 13A10 10 0 0 1 7.305 4.171L9.183 7.702A6 6 0 0 0 6 13L6 22L2 22Z
+M2 13A10 10 0 0 1 8.023327 3.824703L9.613996 7.494822A6 6 0 0 0 6 13L6 22L2 22Z
 
 right pier and voussoir:
-M22 13A10 10 0 0 0 16.695 4.171L14.817 7.702A6 6 0 0 1 18 13L18 22L22 22Z
+M22 13A10 10 0 0 0 15.976673 3.824703L14.386004 7.494822A6 6 0 0 1 18 13L18 22L22 22Z
 
 keystone:
-M7.879 2.801A11 11 0 0 1 16.121 2.801L14.248 7.437A6 6 0 0 0 9.752 7.437Z
+M7.879327 2.800978A11 11 0 0 1 16.120673 2.800978L14.247640 7.436897A6 6 0 0 0 9.752360 7.436897Z
 ```
+
+Each joint is unpainted geometry between two radial edges converging on C. Its
+angular width is derived as `2 × asin(0.25 / (2 × 10))`, giving a 0.25-unit
+chord at the flanking stones' outer face and a 0.15-unit chord at the inner
+face.
 
 ### Usage rules
 
-- Minimum size is 20 px; 24 px or larger is preferred. Below 20 px the
-  six-degree seams close up.
+- Minimum size is 20 px; 24 px or larger is preferred. At very small sizes the
+  thin joints merge and the mark degrades to a solid arch.
 - Clear space on all sides equals the arch band thickness, 4 units on the
   24-unit grid, measured outward from the artwork bounding box.
 - Never rotate, shear, outline, add a drop shadow, apply a gradient, place the
