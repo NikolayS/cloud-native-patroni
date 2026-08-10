@@ -131,6 +131,12 @@ func parseFlags(command string, args []string) (*options, error) {
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
+	// An unrecognised milestone would make every `until:` check unreachable, so
+	// a typo would disable the whole allowlist-expiry gate in silence.
+	if _, known := milestoneOrder[opts.milestone]; !known {
+		return nil, fmt.Errorf("unknown milestone %q, want one of %s",
+			opts.milestone, strings.Join(milestoneNames(), ", "))
+	}
 	return opts, nil
 }
 

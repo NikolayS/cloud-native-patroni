@@ -421,6 +421,19 @@ func TestCheckCommandRejectsAnUnknownFormat(t *testing.T) {
 	}
 }
 
+// A typed milestone that no rule knows must not disable the allowlist-expiry
+// gate in silence.
+func TestCheckCommandRejectsAnUnknownMilestone(t *testing.T) {
+	code, stdout, stderr := captureRun(t, []string{"check", "--milestone", "M9"})
+	if code != exitToolError {
+		t.Fatalf("exit code = %d, want %d\n%s%s", code, exitToolError, stdout, stderr)
+	}
+	if !strings.Contains(stderr, `unknown milestone "M9"`) ||
+		!strings.Contains(stderr, "M0, M1, M2, M3, M4") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
 func TestBaselineCompareCommandMapsGrowthOntoExitCodes(t *testing.T) {
 	refusal := "the authority baseline grew; a change that adds forbidden calls needs an explicit" +
 		" human decision, not a regenerated baseline. Input weakening has no in-band approval;" +

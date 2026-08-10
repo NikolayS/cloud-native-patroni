@@ -39,6 +39,18 @@ type Report struct {
 // milestoneOrder gives the "until" field on an allow entry a meaning.
 var milestoneOrder = map[string]int{"M0": 0, "M1": 1, "M2": 2, "M3": 3, "M4": 4}
 
+// milestoneNames lists the milestones in order, for the message a caller sees
+// when it names one that does not exist.
+func milestoneNames() []string {
+	names := make([]string, 0, len(milestoneOrder))
+	for name := range milestoneOrder {
+		names = append(names, name)
+	}
+	slices.SortFunc(names, func(a, b string) int { return milestoneOrder[a] - milestoneOrder[b] })
+
+	return names
+}
+
 // Check is the gate. It answers five questions:
 //
 //  1. was the baseline measured under this rule set and scope;
@@ -339,6 +351,12 @@ func (r *Report) checkStaleness(rules *RuleSet, res *ScanResult, cls *Classifica
 func (r *Report) checkAllowExpiry(cls *Classification, milestone string) {
 	current, known := milestoneOrder[milestone]
 	if !known {
+		// Fail closed. Returning here would report a tree whose expiry gate
+		// never ran as policy compliance.
+		r.Violations = append(r.Violations, fmt.Sprintf(
+			"the current milestone %q is not one of %s, so no allowlist entry could be checked for expiry",
+			milestone, strings.Join(milestoneNames(), ", ")))
+
 		return
 	}
 	for _, a := range cls.Allow {
