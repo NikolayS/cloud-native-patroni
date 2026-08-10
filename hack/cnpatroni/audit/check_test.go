@@ -369,6 +369,30 @@ func TestCheckExpiresAllowListEntries(t *testing.T) {
 	}
 }
 
+// The expiry gate must never be skipped in silence: a milestone nobody knows is
+// a violation, not a pass.
+func TestCheckRejectsAnUnknownMilestone(t *testing.T) {
+	res := result(nil)
+	rules := ruleSetForFindings(res)
+	cls := &Classification{
+		Schema: classificationSchema,
+		Allow: []AllowEntry{{
+			Rule:       "sync.standby-names",
+			Package:    "pkg/postgres",
+			Reason:     "Temporary exception while the reserved parameter table is rebuilt.",
+			Owner:      "NikolayS",
+			ReviewedAt: "2026-08-09 23:20:00 UTC",
+			Until:      "M1",
+		}},
+	}
+
+	report := Check(rules, res, cls, emptyBaseline(rules, res), "M9")
+
+	if !containsSubstring(report.Violations, `"M9" is not one of M0, M1, M2, M3, M4`) {
+		t.Errorf("an unknown milestone did not fail closed: %v", report.Violations)
+	}
+}
+
 func TestCheckComparesAgainstTheBaseline(t *testing.T) {
 	rules := ruleSet("proc.promote")
 	forbidden := func(symbol string, n int) []Finding {

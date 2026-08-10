@@ -175,8 +175,41 @@ go run ./cmd/cnpatroni-upstream validate --drift --strict # before accepting the
    `HEAD`, so the baseline cannot claim an integration that did not happen.
 
 With `--drift` it also reports files this fork has changed since the fork base
-without declaring them. That is the check that stops the boundary from eroding
-one pull request at a time.
+whose declaration does not account for the change. That is the check that stops
+the boundary from eroding one pull request at a time. Two things are reported:
+
+- `D1`, a changed path no rule classifies, or one that only the catch-all
+  classifies. The remedy is to declare it.
+- `D2`, a changed path that does not hold the content its rule claims. The
+  remedy is to restore the upstream content or to reclassify the path, which is
+  a different problem from an undeclared one, so the two are reported and
+  remedied separately.
+
+Only `adapted`, `disabled`, `cnpatroni-owned`, and `deleted` while the path is
+genuinely absent explain a diff on their own. Matching a specific rule is not
+itself an explanation, or any edit could be laundered past the gate by writing
+one line of YAML.
+
+### What upstream-untouched means operationally
+
+`upstream-untouched` is proved, not asserted. The gate compares the blob the
+path holds at `HEAD` against the set of blobs in the fork base tree, so the
+claim it settles is "these are upstream's bytes", not "this path looks
+untouched":
+
+- Content that was already in the fork base is clean **wherever it now sits**.
+  That is why the verbatim copies parked in `.github/workflows-upstream/` pass:
+  they are byte-identical to the files they were moved from.
+- Content that was not in the fork base is drift, however new or specific the
+  path is. Absence of proof is drift; there is no way to declare around it.
+- A path the fork removed is drift too. The honest declaration is `deleted`.
+
+The operational consequence for a maintainer: **do not edit a file declared
+`upstream-untouched` in place**, including a parked one. Changing the content
+changes the blob, and the gate will fail. If the fork genuinely needs to change
+such a file, reclassify it first — `adapted` for an edit in place, `disabled`
+with a mechanism for a severed one — so that the change is declared before it
+lands rather than explained afterwards.
 
 The check worth understanding is the vocabulary scan. The manifest lists the
 regular expressions that name PostgreSQL high-availability authority —
