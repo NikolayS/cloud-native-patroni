@@ -286,17 +286,6 @@ func (m *Manifest) MatchGlob(path string) string {
 	return ""
 }
 
-// RuleByID returns a rule by its identifier.
-func (m *Manifest) RuleByID(id string) *Rule {
-	for i := range m.Rules {
-		if m.Rules[i].ID == id {
-			return &m.Rules[i]
-		}
-	}
-
-	return nil
-}
-
 // EffectiveClassificationState defaults to applied when the field is absent.
 func (m *Manifest) EffectiveClassificationState() ClassificationState {
 	if m.ClassificationState == "" {

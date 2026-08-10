@@ -222,16 +222,6 @@ func (r *Repo) CurrentBranch() string {
 	return name
 }
 
-// IsClean reports whether the worktree and the index are free of changes.
-func (r *Repo) IsClean() (bool, error) {
-	out, err := r.Run("status", "--porcelain")
-	if err != nil {
-		return false, err
-	}
-
-	return strings.TrimSpace(out) == "", nil
-}
-
 // IsAncestor reports whether a is an ancestor of b.
 func (r *Repo) IsAncestor(a, b string) (bool, error) {
 	_, code, err := r.RunAllowFail("merge-base", "--is-ancestor", a, b)

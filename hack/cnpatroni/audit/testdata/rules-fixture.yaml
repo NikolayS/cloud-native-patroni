@@ -27,6 +27,16 @@ rules:
     calls:
       - .../pg.(*Instance).Shutdown
 
+  - id: proc.exec-pgctl
+    severity: forbidden
+    spec: "7.4 bullet 1"
+    message: invoking pg_ctl belongs to Patroni
+    calls:
+      - os/exec.Command
+      - os/exec.CommandContext
+    call_arg_contains:
+      - pg_ctl
+
   - id: recovery.standby-signal
     severity: forbidden
     spec: "7.4 bullet 3"

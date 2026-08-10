@@ -197,6 +197,9 @@ func (c *Classification) validateResponsibilities() error {
 		case len(strings.Join(strings.Fields(r.Rationale), " ")) < minimumRationale:
 			return fmt.Errorf("responsibility %q has a rationale shorter than %d characters",
 				r.Responsibility, minimumRationale)
+		case r.Owner == "":
+			return fmt.Errorf("responsibility %q has no owner and defaults.owner is unset",
+				r.Responsibility)
 		case !timestampFormat.MatchString(r.ReviewedAt):
 			return fmt.Errorf("responsibility %q has reviewed-at %q, want the format 2006-01-02 15:04:05 UTC",
 				r.Responsibility, r.ReviewedAt)
