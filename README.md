@@ -1,12 +1,9 @@
 # CloudNativePatroni
 
-<!--
-  LOGO PLACEHOLDER — do not fill in by hand.
-  The brand workstream owns the CloudNativePatroni mark and will replace this
-  comment with the logo markup and its alt text. Until then this README ships
-  without any image, deliberately: no CloudNativePG, CNCF, or vendor artwork
-  may appear here.
--->
+<p>
+  <img src="docs/cnpatroni/brand/mark.svg" width="72" height="72"
+       alt="The CloudNativePatroni mark: a masonry arch whose single keystone is picked out in garnet, for the rule that exactly one component holds write authority.">
+</p>
 
 A Kubernetes operator for Postgres in which upstream Patroni is the sole
 high-availability authority. CloudNativePatroni is derived from CloudNativePG
@@ -277,6 +274,8 @@ Patroni-based operators named above. This repository has nothing to install.
 
 - [`docs/cnpatroni/`](docs/cnpatroni/) — documentation owned by this fork,
   including the [identifier and naming policy](docs/cnpatroni/naming-policy.md).
+- [`docs/cnpatroni/brand/`](docs/cnpatroni/brand/) — the mark, the colour and type tokens, and the
+  brand guideline, including the evidence for the project's visual independence.
 - [`CLAUDE.md`](CLAUDE.md) — the working rules for this repository, including
   the single-authority rule and the constraint that no broad identifier rename
   happens yet.
