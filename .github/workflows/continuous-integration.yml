@@ -43,8 +43,12 @@ env:
   BUILD_PUSH_PROVENANCE: ""
   BUILD_PUSH_CACHE_FROM: ""
   BUILD_PUSH_CACHE_TO: ""
-  BUILD_PLUGIN_RELEASE_ARGS: "build --skip=validate --clean --id kubectl-cnpg --timeout 60m"
-  BUILD_MANAGER_RELEASE_ARGS: "build --skip=validate --clean --id manager-race"
+  # CloudNativePatroni: this fork carries no v* tags, and GoReleaser refuses to
+  # compute a version without one. Snapshot mode lets the build proceed. The
+  # operator version comes from {{.Env.VERSION}} in .goreleaser.yml, so the
+  # produced binaries are unaffected.
+  BUILD_PLUGIN_RELEASE_ARGS: "build --skip=validate --clean --snapshot --id kubectl-cnpg --timeout 60m"
+  BUILD_MANAGER_RELEASE_ARGS: "build --skip=validate --clean --snapshot --id manager-race"
   REPOSITORY_OWNER: "cloudnative-pg"
   REGISTRY: "ghcr.io"
   REGISTRY_USER: ${{ github.actor }}
@@ -560,6 +564,15 @@ jobs:
           then
             echo "PUSH=false" >> $GITHUB_ENV
           fi
+
+      # CloudNativePatroni: publishing operator images is not a fork deliverable.
+      # Image signing and the Dockle scan both need a published image and a signing
+      # identity this fork has not established. Set the repository variable
+      # ENABLE_IMAGE_PUSH to 'true' to re-enable the push, Dockle scans, cosign
+      # signing and the images matrix.
+      - name: Disable the container image push in this fork
+        if: vars.ENABLE_IMAGE_PUSH != 'true'
+        run: echo "PUSH=false" >> "$GITHUB_ENV"
 
       - name: Set GoReleaser environment
         run: |
