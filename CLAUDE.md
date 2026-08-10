@@ -121,6 +121,17 @@ deviation is open with the project owner; do not describe the base as the
 owner's decision, because that would discard inherited upstream work already
 present here.
 
+**Recorded deviation.** Specification section 12.1 sets Patroni `ttl` to 30
+seconds. PoC-owned configuration uses 45 seconds so its fencing timings satisfy
+`ttl >= loop_wait + retry_timeout + failureThreshold x periodSeconds +
+timeoutSeconds + probe terminationGracePeriodSeconds + safetyMargin`. With the
+PoC values, both sides are 45 seconds. The old 30-second target can be reached
+only by shrinking the probe path to 10 seconds and eliminating the required
+5-second safety margin; at a 5-second period that forces `failureThreshold` to
+1, so one missed probe under CPU pressure can terminate a healthy primary. Do
+not restore `ttl: 30` or change one timing independently. Applying this policy
+to inherited operator probe generation is deferred to M1.
+
 Upstream changes are merged through the integration branch, reviewed, then
 merged into main; preserve upstream commits and copyright notices. Re-run the
 authority audit and the safety suite after any upstream integration touching

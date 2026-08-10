@@ -233,6 +233,69 @@ In the taxonomy above, the proven core is what makes a concurrent fork
 preventable at all. The unproven last mile is why prevention must still be
 demonstrated rather than asserted.
 
+### The probe fence has a timing budget
+
+CloudNativePatroni adopts the following published fencing practice from
+StackGres 1.19.0:
+
+```text
+ttl >= loop_wait + retry_timeout
+       + failureThreshold x periodSeconds
+       + timeoutSeconds
+       + probe terminationGracePeriodSeconds
+       + safetyMargin
+```
+
+The maximum age of the last successful leader-lock renewal is `loop_wait +
+retry_timeout`: a successful renewal can already be one loop interval old when
+the next attempt begins, and that attempt can consume the retry timeout. The
+probe budget retains `failureThreshold x periodSeconds`, not
+`(failureThreshold - 1) x periodSeconds`, because a freeze does not land on a
+probe tick. One full period of slack is therefore part of the fence rather than
+an optional optimisation.
+
+The PoC values make the boundary explicit:
+
+```text
+45 >= 10 + 10 + 3 x 5 + 2 + 3 + 5
+45 >= 45
+```
+
+The terms are `ttl`, `loop_wait`, `retry_timeout`, liveness failure threshold,
+liveness period, liveness timeout, probe-level termination grace and a
+5-second safety margin, in that order. This deliberately raises `ttl` from the
+30 seconds specified by architecture specification section 12.1. At 30
+seconds, the loop and retry terms leave only 10 seconds for probe handling and
+safety. A nominal 10-second probe path forces `failureThreshold: 1` at the
+5-second period once the 2-second timeout and 3-second termination grace are
+included, while eliminating the required safety margin. A single missed probe
+under CPU pressure could then terminate a healthy primary.
+
+Liveness and startup call Patroni's own REST `/liveness` endpoint directly;
+readiness calls its `/readiness` endpoint. No container proxies these probes.
+The startup probe owns the start window: its `180 x 5` second budget tolerates
+`initdb`, `pg_basebackup` and rewind. Liveness sets `initialDelaySeconds: 0`
+because Kubernetes begins that delay only after startup first succeeds. A
+second delay would reopen an unprotected post-start window and break the
+fencing margin.
+
+Two limits remain:
+
+- **The probe cannot fence every hang.** Patroni's `/liveness` returns 503 only
+  when the heartbeat loop last ran more than `ttl` ago. If the HA loop wedges
+  while the REST thread still answers 200, the probe does not begin failing
+  until around lock expiry. The inequality covers the case where the port
+  stops answering promptly; it does not cover a wedged loop with a live REST
+  thread.
+- **Probe-level `terminationGracePeriodSeconds` is a term in the inequality.**
+  It requires Kubernetes 1.25 or later. Below 1.25, or when the
+  `ProbeTerminationGracePeriod` feature gate is disabled on Kubernetes 1.25
+  through 1.27, the pod-level grace period applies instead and consumes the
+  entire margin. Kubernetes 1.25 with that gate enabled is therefore the floor.
+
+This is factual attribution of an adopted StackGres practice; it does not imply
+affiliation with StackGres.
+
 ## Why split brain is hard to observe
 
 Split brain does not happen to a correctly fenced system. A working Patroni

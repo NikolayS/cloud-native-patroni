@@ -35,7 +35,11 @@ data:
       # Patroni writes this block to the DCS only during first bootstrap.
       # Later edits here do not change an existing cluster's live settings.
       dcs:
-        ttl: 30
+        # Fencing requires ttl >= loop_wait + retry_timeout
+        #   + failureThreshold x periodSeconds + timeoutSeconds
+        #   + probe terminationGracePeriodSeconds + safetyMargin.
+        # Here: 45 >= 10 + 10 + 3 x 5 + 2 + 3 + 5.
+        ttl: 45
         loop_wait: 10
         retry_timeout: 10
         maximum_lag_on_failover: 1048576

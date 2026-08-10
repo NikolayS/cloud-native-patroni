@@ -1,5 +1,5 @@
 # This exercises restart in place while the leader still holds the DCS session
-# lock because kubelet restart latency is far below ttl: 30. It exercises no
+# lock because kubelet restart latency is far below ttl: 45. It exercises no
 # leader election, so a passing s1 is not evidence that failover works. A
 # scenario that forces an election must keep the leader down longer than ttl,
 # and no such scenario exists yet.

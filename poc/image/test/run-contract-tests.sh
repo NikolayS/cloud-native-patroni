@@ -215,6 +215,105 @@ test_harness_enforces_every_assertion() {
   return "${self_test_failed}"
 }
 
+test_poc_fencing_configuration() {
+  docker run --rm --interactive \
+    --entrypoint python3 \
+    --volume "${IMAGE_DIR}/..:/poc:ro" \
+    "${PROD_IMAGE}" - <<'PYTHON'
+import pathlib
+import sys
+
+import yaml
+
+
+def require(condition, message):
+    if not condition:
+        print(message, file=sys.stderr)
+        return 1
+    return 0
+
+
+failures = 0
+poc = pathlib.Path("/poc")
+config_map = yaml.safe_load((poc / "manifests/cluster/20-config.yaml").read_text())
+manifest_config = yaml.safe_load(config_map["data"]["patroni.yml.in"])
+test_config = yaml.safe_load((poc / "image/test/patroni-test.yml").read_text())
+for source, configuration in (
+    ("manifest Patroni configuration", manifest_config),
+    ("image test Patroni configuration", test_config),
+):
+    dcs = configuration["bootstrap"]["dcs"]
+    failures += require(dcs["ttl"] == 45, f"{source} ttl was {dcs['ttl']}, not 45")
+    failures += require(dcs["loop_wait"] == 10, f"{source} loop_wait was not 10")
+    failures += require(dcs["retry_timeout"] == 10, f"{source} retry_timeout was not 10")
+
+documents = list(yaml.safe_load_all((poc / "manifests/cluster/50-instances.yaml").read_text()))
+failures += require(len(documents) == 3, f"instance manifest contained {len(documents)} Pods, not 3")
+for document in documents:
+    pod_name = document["metadata"]["name"]
+    containers = document["spec"]["containers"]
+    failures += require(
+        [container["name"] for container in containers] == ["patroni"],
+        f"{pod_name} does not have Patroni as its sole container",
+    )
+    patroni = containers[0]
+    ports = {port["name"]: port["containerPort"] for port in patroni["ports"]}
+    failures += require(
+        ports.get("patroni-rest") == 8008,
+        f"{pod_name} does not expose Patroni REST as patroni-rest on 8008",
+    )
+    expected_probes = {
+        "livenessProbe": {
+            "httpGet": {"path": "/liveness", "port": "patroni-rest", "scheme": "HTTP"},
+            "initialDelaySeconds": 0,
+            "periodSeconds": 5,
+            "timeoutSeconds": 2,
+            "failureThreshold": 3,
+            "terminationGracePeriodSeconds": 3,
+        },
+        "readinessProbe": {
+            "httpGet": {"path": "/readiness", "port": "patroni-rest", "scheme": "HTTP"},
+            "periodSeconds": 2,
+            "timeoutSeconds": 1,
+            "successThreshold": 1,
+            "failureThreshold": 6,
+        },
+        "startupProbe": {
+            "httpGet": {"path": "/liveness", "port": "patroni-rest", "scheme": "HTTP"},
+            "periodSeconds": 5,
+            "timeoutSeconds": 5,
+            "failureThreshold": 180,
+        },
+    }
+    for probe_name, expected in expected_probes.items():
+        failures += require(
+            patroni.get(probe_name) == expected,
+            f"{pod_name} {probe_name} did not match the direct Patroni probe contract",
+        )
+
+dcs = manifest_config["bootstrap"]["dcs"]
+liveness = documents[0]["spec"]["containers"][0]["livenessProbe"]
+safety_margin = 5
+try:
+    fencing_budget = (
+        dcs["loop_wait"]
+        + dcs["retry_timeout"]
+        + liveness["failureThreshold"] * liveness["periodSeconds"]
+        + liveness["timeoutSeconds"]
+        + liveness["terminationGracePeriodSeconds"]
+        + safety_margin
+    )
+except (KeyError, TypeError) as error:
+    failures += require(False, f"could not calculate fencing budget: {error}")
+else:
+    failures += require(
+        dcs["ttl"] >= fencing_budget,
+        f"fencing inequality failed: ttl {dcs['ttl']} is less than budget {fencing_budget}",
+    )
+raise SystemExit(failures != 0)
+PYTHON
+}
+
 test_entrypoint_ends_with_exec_patroni() {
   local last_line
   local last_user
@@ -483,11 +582,12 @@ test_rendered_config_is_valid_and_0600() {
     --entrypoint bash \
     "${docker_args[@]}" \
     "${PROD_IMAGE}" \
-    -c 'cnpatroni-render-config && stat -c "mode=%a" "${CNPATRONI_CONFIG_FILE}" && patroni --validate-config "${CNPATRONI_CONFIG_FILE}"' 2>&1)"; then
+    -c 'cnpatroni-render-config && stat -c "mode=%a" "${CNPATRONI_CONFIG_FILE}" && grep -Eq "^[[:space:]]+ttl: 45$" "${CNPATRONI_CONFIG_FILE}" && printf "ttl=45\n" && patroni --validate-config "${CNPATRONI_CONFIG_FILE}"' 2>&1)"; then
     fail "renderer or Patroni validation failed: ${output}"
     return 1
   fi
   grep -Fq 'mode=600' <<<"${output}" || fail "rendered configuration mode was not 0600: ${output}"
+  grep -Fq 'ttl=45' <<<"${output}" || fail "rendered configuration ttl was not 45: ${output}"
   for secret in "${secrets_directory}"/*; do
     if grep -Fq "$(<"${secret}")" <<<"${output}"; then
       fail "renderer output exposed a password from $(basename -- "${secret}")"
@@ -535,6 +635,7 @@ main() {
   trap cleanup EXIT
   build_images
   run_test "harness-enforces-every-assertion" test_harness_enforces_every_assertion
+  run_test "poc-fencing-configuration" test_poc_fencing_configuration
   run_test "entrypoint-ends-with-exec-patroni" test_entrypoint_ends_with_exec_patroni
   run_test "patroni-is-pid-1" test_patroni_is_pid_1
   run_test "pid-1-catches-sigterm" test_pid_1_catches_sigterm

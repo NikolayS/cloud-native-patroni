@@ -77,31 +77,40 @@ spec:
           value: "$(POD_IP):8008"
         - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
           value: "$(POD_IP):5432"
+      # Fencing requires ttl >= loop_wait + retry_timeout
+      #   + failureThreshold x periodSeconds + timeoutSeconds
+      #   + probe terminationGracePeriodSeconds + safetyMargin.
+      # Here: 45 >= 10 + 10 + 3 x 5 + 2 + 3 + 5.
       startupProbe:
         httpGet:
           path: /liveness
-          port: 8008
-          scheme: HTTP
-        periodSeconds: 10
-        timeoutSeconds: 5
-        failureThreshold: 60
-      livenessProbe:
-        httpGet:
-          path: /liveness
-          port: 8008
-          scheme: HTTP
-        periodSeconds: 10
-        timeoutSeconds: 5
-        failureThreshold: 6
-      readinessProbe:
-        httpGet:
-          path: /readiness
-          port: 8008
+          port: patroni-rest
           scheme: HTTP
         periodSeconds: 5
         timeoutSeconds: 5
-        successThreshold: 1
+        failureThreshold: 180
+      livenessProbe:
+        httpGet:
+          path: /liveness
+          port: patroni-rest
+          scheme: HTTP
+        # Kubernetes begins this delay only after startup first succeeds.
+        # Zero avoids reopening an unprotected post-start window and preserves
+        # the fencing margin.
+        initialDelaySeconds: 0
+        periodSeconds: 5
+        timeoutSeconds: 2
         failureThreshold: 3
+        terminationGracePeriodSeconds: 3
+      readinessProbe:
+        httpGet:
+          path: /readiness
+          port: patroni-rest
+          scheme: HTTP
+        periodSeconds: 2
+        timeoutSeconds: 1
+        successThreshold: 1
+        failureThreshold: 6
       volumeMounts:
         - name: pgdata
           mountPath: /var/lib/postgresql/data
@@ -207,31 +216,40 @@ spec:
           value: "$(POD_IP):8008"
         - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
           value: "$(POD_IP):5432"
+      # Fencing requires ttl >= loop_wait + retry_timeout
+      #   + failureThreshold x periodSeconds + timeoutSeconds
+      #   + probe terminationGracePeriodSeconds + safetyMargin.
+      # Here: 45 >= 10 + 10 + 3 x 5 + 2 + 3 + 5.
       startupProbe:
         httpGet:
           path: /liveness
-          port: 8008
-          scheme: HTTP
-        periodSeconds: 10
-        timeoutSeconds: 5
-        failureThreshold: 60
-      livenessProbe:
-        httpGet:
-          path: /liveness
-          port: 8008
-          scheme: HTTP
-        periodSeconds: 10
-        timeoutSeconds: 5
-        failureThreshold: 6
-      readinessProbe:
-        httpGet:
-          path: /readiness
-          port: 8008
+          port: patroni-rest
           scheme: HTTP
         periodSeconds: 5
         timeoutSeconds: 5
-        successThreshold: 1
+        failureThreshold: 180
+      livenessProbe:
+        httpGet:
+          path: /liveness
+          port: patroni-rest
+          scheme: HTTP
+        # Kubernetes begins this delay only after startup first succeeds.
+        # Zero avoids reopening an unprotected post-start window and preserves
+        # the fencing margin.
+        initialDelaySeconds: 0
+        periodSeconds: 5
+        timeoutSeconds: 2
         failureThreshold: 3
+        terminationGracePeriodSeconds: 3
+      readinessProbe:
+        httpGet:
+          path: /readiness
+          port: patroni-rest
+          scheme: HTTP
+        periodSeconds: 2
+        timeoutSeconds: 1
+        successThreshold: 1
+        failureThreshold: 6
       volumeMounts:
         - name: pgdata
           mountPath: /var/lib/postgresql/data
@@ -337,31 +355,40 @@ spec:
           value: "$(POD_IP):8008"
         - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
           value: "$(POD_IP):5432"
+      # Fencing requires ttl >= loop_wait + retry_timeout
+      #   + failureThreshold x periodSeconds + timeoutSeconds
+      #   + probe terminationGracePeriodSeconds + safetyMargin.
+      # Here: 45 >= 10 + 10 + 3 x 5 + 2 + 3 + 5.
       startupProbe:
         httpGet:
           path: /liveness
-          port: 8008
-          scheme: HTTP
-        periodSeconds: 10
-        timeoutSeconds: 5
-        failureThreshold: 60
-      livenessProbe:
-        httpGet:
-          path: /liveness
-          port: 8008
-          scheme: HTTP
-        periodSeconds: 10
-        timeoutSeconds: 5
-        failureThreshold: 6
-      readinessProbe:
-        httpGet:
-          path: /readiness
-          port: 8008
+          port: patroni-rest
           scheme: HTTP
         periodSeconds: 5
         timeoutSeconds: 5
-        successThreshold: 1
+        failureThreshold: 180
+      livenessProbe:
+        httpGet:
+          path: /liveness
+          port: patroni-rest
+          scheme: HTTP
+        # Kubernetes begins this delay only after startup first succeeds.
+        # Zero avoids reopening an unprotected post-start window and preserves
+        # the fencing margin.
+        initialDelaySeconds: 0
+        periodSeconds: 5
+        timeoutSeconds: 2
         failureThreshold: 3
+        terminationGracePeriodSeconds: 3
+      readinessProbe:
+        httpGet:
+          path: /readiness
+          port: patroni-rest
+          scheme: HTTP
+        periodSeconds: 2
+        timeoutSeconds: 1
+        successThreshold: 1
+        failureThreshold: 6
       volumeMounts:
         - name: pgdata
           mountPath: /var/lib/postgresql/data

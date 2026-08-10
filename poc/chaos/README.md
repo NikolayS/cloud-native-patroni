@@ -16,7 +16,7 @@ The driver expects an already running oracle Pod labelled
 `cnpatroni.io/component=oracle`.
 
 `s1-primary-crash` exercises restart in place while the leader still holds the
-DCS session lock because kubelet restart latency is far below `ttl: 30`. It
+DCS session lock because kubelet restart latency is far below `ttl: 45`. It
 does not exercise a leader election, so a passing `s1` is not evidence that
 failover works. A scenario that forces an election must keep the leader down
 longer than `ttl`, and no such scenario exists yet.
