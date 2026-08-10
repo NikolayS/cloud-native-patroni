@@ -590,6 +590,7 @@ func checkDrift(m *Manifest, opts Options) ([]Finding, error) {
 				Severity: SeverityUndeclared,
 			})
 		case rule.Ownership == OwnershipAdapted:
+			// This relies on ChangedFiles yielding only blob paths; cat-file -e also succeeds for directories.
 			existed, existsErr := opts.Repo.PathExistsAt(opts.Baseline.ForkBase.Commit, change.Path)
 			if existsErr != nil {
 				return nil, existsErr
