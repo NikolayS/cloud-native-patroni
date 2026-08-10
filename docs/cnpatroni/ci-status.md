@@ -5,32 +5,33 @@ has to exist before dormant publication and delivery paths can be enabled.
 
 ## What a green board proves
 
-There is no Kubernetes cluster in this project. No container runtime runs the operator in these
-checks, no operator image is published, and there is no Patroni container or Patroni process under
-test. No CI job exercises a running Postgres, a running Patroni, a failover, or a network
-partition, and no job injects a fault into the fencing path. Since a working Patroni prevents a
-concurrent timeline fork by construction, the evidence that would matter is entirely in the
-fencing-failure cases, and none of it exists yet.
+There is no Kubernetes cluster in these checks. No container runtime runs the operator, and no
+operator image is published. The container contract workflow builds the production database image
+and exercises a single container running Patroni and Postgres; it does not form a Patroni cluster.
+No CI job exercises failover or a network partition, and no job injects a fault into the fencing
+path. Since a working Patroni prevents a concurrent timeline fork by construction, the evidence
+that would matter is entirely in the fencing-failure cases, and none of it exists yet.
 
 A fully green board is therefore not evidence that the operator works, that Patroni holds
 high-availability authority, or that any cluster behaves correctly. It is evidence only that the
 code compiles, the unit tests pass, the generated artefacts match their sources, the documentation
-builds, and the fork's boundary, authority, and code-hygiene gates are satisfied.
+builds, the fork's boundary, authority, and code-hygiene gates are satisfied, and the production
+database image satisfies eight container contracts and the harness self-test on `linux/amd64`.
 
-The two fork-owned gate workflows now run on every push to every branch. Previously, a push to a
+The three fork-owned gate workflows now run on every push to every branch. Previously, a push to a
 branch outside their filters was unguarded unless an open pull request supplied a `pull_request`
-run. The jobs are cheap, and the fork's authority claim depends on them, so filtering branch names
-would make a cost saving into a correctness risk.
+run. The fork's authority and process-lifecycle claims depend on these gates, so filtering branch
+names would make a cost saving into a correctness risk.
 
 The `divergence-report` job is different: it runs only on the weekly schedule and
 `workflow_dispatch`. Skipping it during ordinary development is correct for its purpose, but also
 means ordinary development never exercises it. Unless someone dispatches it manually, a break in
 the job surfaces on the weekly schedule or not at all.
 
-The authority-audit workflow sets `cancel-in-progress: true`, so a rapid second push to the same
-ref cancels the first run. The most recent run being green therefore does not establish that a
-given commit was verified; a green can belong to a superseded commit. The upstream-sync
-workflow cancels only `pull_request` runs, not push runs.
+The authority-audit and container-contract workflows set `cancel-in-progress: true`, so a rapid
+second push to the same ref cancels the first run. The most recent run being green therefore does
+not establish that a given commit was verified; a green can belong to a superseded commit. The
+upstream-sync workflow cancels only `pull_request` runs, not push runs.
 
 The end-to-end suite would provision Kubernetes clusters and exercise a running operator and its
 managed clusters. That would provide behavioural evidence for the scenarios it covers. The suite
@@ -38,6 +39,30 @@ lives in `continuous-delivery.yml` and never runs for a pull request. Its reques
 through `issue_comment` and `workflow_dispatch`; the inherited workflow also declares a daily
 schedule. Every path needs cloud credentials this fork does not hold and an operator image this
 fork does not publish, so the suite does not run successfully here.
+
+## Open container-exit question
+
+`no-postgres-survives-container-exit` records the container's host PIDs, sends SIGKILL to the
+container, and asserts that none of those PIDs and no process matching the test cluster survives.
+From a clean start with nothing else running, it passes on `linux/amd64` and fails reproducibly on
+`linux/arm64` at its 30-second deadline. The processes do eventually exit; the cause is not
+established.
+
+Neither local result is authoritative. Both were measured on macOS through the `desktop-linux`
+Docker context, whose server reports Docker Desktop with kernel `6.12.54-linuxkit`. Docker runs
+inside that LinuxKit virtual machine: `--pid host` sweeps the virtual machine's PID namespace, not
+the macOS host's, and container teardown crosses a virtualisation layer absent from a plain Linux
+host. The arm64 failure may be teardown lag in that virtual machine, while the amd64 pass may be
+luck under emulation.
+
+The container-contract CI job is consequently the first measurement of this property on a
+representative host. A consistent pass there is better evidence than either local platform can
+produce. A failure there matters more than a local flake: it would mean Postgres can outlive its
+container on an ordinary Linux host. If the container is reported stopped while its postmaster
+lingers and Kubernetes starts a replacement, the lingering process is an unsupervised writable
+postmaster.
+
+This question is open, not resolved. A green board must not be read as closing it.
 
 ## Code hygiene gate
 
@@ -104,7 +129,7 @@ the threshold or add an analysis exclusion.
 
 ## Active workflow disposition
 
-Exactly eight workflow files remain active under `.github/workflows/`.
+Exactly nine workflow files remain active under `.github/workflows/`.
 
 | File | Disposition |
 |---|---|
@@ -112,6 +137,7 @@ Exactly eight workflow files remain active under `.github/workflows/`.
 | `codeql-analysis.yml` | Active and passing. It was briefly red for an unrelated reason: a deliberately malformed Go test fixture under `hack/cnpatroni/audit/testdata/` broke `make generate` during the CodeQL build step. Commit `20e49a0e` fixed the fixture, after which run `31346382287` concluded `success`. |
 | `spellcheck.yml` | Active and passing. It provides the `Run spellcheck` and `Run woke` checks. Its spellcheck sources cover `docs/src/` Markdown and `config/olm-manifests/bases/*.yaml`, so `docs/cnpatroni/` is not spellchecked; woke covers the wider tree according to its own configuration. |
 | `cnpatroni-authority-audit.yml` | Fork-owned, active, and passing. Its authority and code-hygiene jobs run on every pull request and every push to any branch. |
+| `cnpatroni-contract-tests.yml` | Fork-owned and active. Its job runs on every pull request and every push to any branch, builds the production image, and runs the container contracts on `linux/amd64`. It is the only CI job that runs a Patroni process at all. |
 | `cnpatroni-upstream-sync.yml` | Fork-owned and contains three jobs. `boundary-guard` runs on every pull request and every push to any branch, and is passing. `divergence-report` runs only on the weekly schedule and `workflow_dispatch`, so its pull-request skip is correct. |
 | `continuous-delivery.yml` | Never runs on pull requests. Requested runs use `issue_comment` or `workflow_dispatch`; the inherited file also has a daily schedule. It provisions clusters and structurally needs cloud credentials, a Kubernetes cluster, and a published operator image, none of which exist here. It remains unmodified and dormant for this fork. |
 | `registry-clean.yml` | Runs on a daily schedule and through `workflow_dispatch`. It prunes the `cloudnative-pg-testing` package and, only when the repository owner is `cloudnative-pg`, the `pgbouncer-testing`, `postgresql-testing`, and `postgis-testing` operand packages. With `ENABLE_IMAGE_PUSH` unset, this fork publishes nothing, so there is nothing to prune. It remains in place and dormant in effect. |
