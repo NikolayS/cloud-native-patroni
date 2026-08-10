@@ -23,7 +23,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/boundary"
 )
 
 func renderAttributes(t *testing.T, body string) string {

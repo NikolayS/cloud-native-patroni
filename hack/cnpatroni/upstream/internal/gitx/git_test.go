@@ -28,8 +28,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gittest"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gittest"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gitx"
 )
 
 // A remedy is worth nothing if the command in it does not run. This tool is its

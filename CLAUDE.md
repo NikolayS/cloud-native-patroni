@@ -56,9 +56,7 @@ competing decision-maker is rejected regardless of how small the diff is.
 
 ## Rule 3 — engineering rules
 
-This project follows the PostgresAI engineering rules
-(https://gitlab.com/postgres-ai/rules), which are not vendored here. The points
-that bite most often:
+CloudNativePatroni uses the following engineering rules as its own conventions:
 
 - Sentence-case headings; no emoji anywhere, including code comments; em dashes
   are spaced (`word — word`); absolute timestamps as `YYYY-MM-DD HH:mm:ss UTC`;
@@ -76,9 +74,9 @@ Where these meet inherited CloudNativePG conventions:
 
 | Question | Which wins |
 |---|---|
-| Heading case in files we author or rewrite | PostgresAI: sentence case. Do not mass-rewrite inherited headings. |
-| "Postgres" vs "PostgreSQL" in new prose | PostgresAI: Postgres. API identifiers, CRD groups, field names, and quoted text stay as they are. |
-| Commit subject length, present tense, no `--amend`, no force push | PostgresAI. |
+| Heading case in files we author or rewrite | CloudNativePatroni: sentence case. Do not mass-rewrite inherited headings. |
+| "Postgres" vs "PostgreSQL" in new prose | CloudNativePatroni: Postgres. API identifiers, CRD groups, field names, and quoted text stay as they are. |
+| Commit subject length, present tense, no `--amend`, no force push | CloudNativePatroni. |
 | DCO `Signed-off-by` on every commit | CloudNativePG. It is additive, so keep `git commit -s`. |
 | Apache-2.0 headers on every Go and shell file | CloudNativePG and specification section 20.3. Copy the header from a neighbouring file, keeping the CloudNativePG copyright line intact. |
 | Emoji in push or pull-request summaries | No emoji. The professional-communication rule has an explicit precedence clause. |

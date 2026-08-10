@@ -371,7 +371,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/boundary"
 )
 
 func main() {

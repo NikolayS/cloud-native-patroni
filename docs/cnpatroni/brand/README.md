@@ -1,6 +1,5 @@
 This file and the assets beside it are covered by
-[`docs/LICENSE`](../../LICENSE), Creative Commons Attribution 4.0 International,
-like the rest of `docs/`.
+[`LICENSE`](../../../LICENSE), like the other project-owned files.
 
 # CloudNativePatroni brand guideline
 

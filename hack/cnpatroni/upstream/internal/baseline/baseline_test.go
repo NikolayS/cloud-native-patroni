@@ -25,7 +25,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/baseline"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/baseline"
 )
 
 const goodBaseline = `

@@ -29,7 +29,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gitx"
 )
 
 // fixedDate keeps commit identifiers reproducible across runs.

@@ -22,7 +22,7 @@ package boundary_test
 import (
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/boundary"
 )
 
 func TestGlobMatch(t *testing.T) {

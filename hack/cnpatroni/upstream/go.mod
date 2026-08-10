@@ -1,4 +1,4 @@
-module github.com/postgres-ai/cnpatroni-upstream
+module github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream
 
 go 1.26.5
 

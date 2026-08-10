@@ -26,8 +26,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/baseline"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/baseline"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gitx"
 )
 
 // Severity grades a validation finding.

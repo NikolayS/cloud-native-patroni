@@ -33,11 +33,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/baseline"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/report"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/setup"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/baseline"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/boundary"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gitx"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/report"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/setup"
 )
 
 // Version is the tool version, reported in every machine-readable report.

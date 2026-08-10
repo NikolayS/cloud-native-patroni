@@ -46,7 +46,7 @@ var destinations = map[string]bool{
 	"operator": true, "disabled": true,
 }
 
-// timestampFormat is the PostgresAI absolute timestamp format. A bare date is
+// timestampFormat is this project's absolute timestamp format. A bare date is
 // rejected: "reviewed on the ninth" is not a reviewable statement.
 var timestampFormat = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC$`)
 

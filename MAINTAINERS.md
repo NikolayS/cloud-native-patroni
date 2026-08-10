@@ -1,12 +1,9 @@
 # Maintainers
 
-CloudNativePatroni is maintained by PostgresAI.
+CloudNativePatroni is a personal project maintained by one individual.
 
-No individual maintainer list is published yet. The project is a pre-alpha
-architecture spike with no external contributors, and naming people before there
-is a review rota would create an expectation the project cannot meet. This file
-is updated with named maintainers and their areas when the project starts taking
-contributions from outside PostgresAI.
+The maintainer's identity is not published here. The project is a pre-alpha
+architecture spike with no external contributors.
 
 Decision-making is described in [`GOVERNANCE.md`](GOVERNANCE.md).
 

@@ -28,9 +28,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gittest"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/setup"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gittest"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gitx"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/setup"
 )
 
 // newUpstream builds a stand-in for the upstream CloudNativePG repository.

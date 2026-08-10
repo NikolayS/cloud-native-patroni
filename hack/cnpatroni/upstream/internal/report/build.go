@@ -27,9 +27,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/baseline"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/baseline"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/boundary"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gitx"
 )
 
 // haSignal matches the commit subjects that are worth a second look even when
