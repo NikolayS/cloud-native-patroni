@@ -1,18 +1,35 @@
-# Security Policy
+# Security policy
 
-## Supported Versions
+## Supported versions
 
-For details on all Community supported versions of CloudNativePG, please refer to the
-["Supported releases" section in the official documentation](https://cloudnative-pg.io/docs/devel/supported_releases/).
+None. CloudNativePatroni has no releases and no supported versions. It is a
+pre-alpha architecture spike and must not be deployed. Nothing in this
+repository is maintained against a security response commitment.
 
-## Reporting a Vulnerability
+## Reporting a vulnerability
 
-To make a report, send an email containing the details of the vulnerability to
-security@cloudnative-pg.io (an alias to a private mailing list in Google Groups
-containing just the maintainers of the project). Private disclosure of a potential
-vulnerability is important. The maintainers will reply acknowledging the report,
-and decide whether to keep it private or publicly disclose it.
+There is no vulnerability disclosure channel for this project yet. A private
+reporting channel and a response process will be published here before any
+release intended for use, and this file will be updated at that time.
 
-CloudNativePG relies on the
-[GitHub infrastructure to manage security advisories and manage vulnerabilities](https://github.com/cloudnative-pg/cloudnative-pg/security).
+Do **not** send reports about CloudNativePatroni to the CloudNativePG security
+contacts. They are the maintainers of a different project, they cannot act on
+issues that exist only in this fork, and they have not agreed to receive them.
 
+If you have found a vulnerability that affects **CloudNativePG itself** — that
+is, code inherited unchanged from upstream, which at this milestone is nearly
+all of it — report it to the CloudNativePG project through the process that
+project publishes, so that its users benefit from the fix. Please do not open a
+public issue in either repository for an unfixed vulnerability.
+
+## Scope note
+
+Because this fork is at milestone M0, the security-relevant behaviour of the
+inherited code is unchanged from CloudNativePG 1.30.0. The high-availability
+architecture described in the README is a target, not an implementation, and
+none of its safety properties are claimed to hold today. The limits that will
+apply even once it is implemented are stated in the README under "What is not
+claimed".
+
+> CloudNativePatroni is an independent project derived from CloudNativePG. It is not affiliated
+> with or endorsed by CloudNativePG, CNCF, LF Projects, or the Patroni maintainers.

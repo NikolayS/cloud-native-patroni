@@ -1,0 +1,54 @@
+CloudNativePatroni
+Copyright © contributors to CloudNativePatroni.
+
+This product includes software developed as part of CloudNativePG
+(https://github.com/cloudnative-pg/cloudnative-pg), copyright © contributors to
+CloudNativePG, established as CloudNativePG a Series of LF Projects, LLC, and
+licensed under the Apache License, Version 2.0.
+
+CloudNativePatroni is an independent project derived from CloudNativePG. It is not affiliated
+with or endorsed by CloudNativePG, CNCF, LF Projects, or the Patroni maintainers.
+
+
+1. Notice of modification (Apache License 2.0, section 4(b))
+
+This repository is a derivative work of CloudNativePG release 1.30.0. Files
+carried over from CloudNativePG have been, or will be, modified by contributors
+to CloudNativePatroni. Their original copyright and licence headers are retained
+unchanged, as section 4(b) requires; this NOTICE is the prominent statement that
+the files carry modifications, in place of a per-file edit across the whole
+inherited tree.
+
+Files created by CloudNativePatroni carry a CloudNativePatroni copyright line
+and do not assert CloudNativePG or LF Projects stewardship. A mixed header state
+across the tree is therefore expected and correct.
+
+
+2. Documentation attribution (CC BY 4.0)
+
+The documentation under docs/ is licensed under the Creative Commons Attribution
+4.0 International licence; see docs/LICENSE. Attribution is a condition of that
+licence, not a courtesy. Any page under docs/ that retains or adapts
+CloudNativePG documentation credits CloudNativePG as the original author and
+indicates that changes were made.
+
+
+3. Trademarks
+
+The Apache License, Version 2.0 grants no trademark rights (section 6).
+"CloudNativePG" is used in this repository only to describe the origin of the
+derived work. It is not used as branding for this project.
+
+Postgres, PostgreSQL, and the Slonik Logo are trademarks or registered
+trademarks of the PostgreSQL Community Association of Canada, and used with
+their permission. See https://www.postgresql.org/about/policies/trademarks/
+
+
+4. Third-party components
+
+Third-party Go dependency licences are collected under licenses/.
+
+CloudNativePatroni packages upstream Patroni, which is licensed under the MIT
+licence. Patroni is not yet packaged in this repository; when the database image
+is built, the Patroni licence text and attribution will ship with that image and
+this section will be extended to record it.

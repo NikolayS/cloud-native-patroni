@@ -1,65 +1,87 @@
-# CloudNativePG roadmap
+# Roadmap
 
-This document outlines the planning and roadmap process for the CloudNativePG
-project.
+CloudNativePatroni is an architecture spike. This roadmap is the milestone plan
+from the architecture specification, section 16, summarised. There is no public
+project board, no release schedule, and no date commitment; adding one would be
+a guess.
 
-## Our public roadmap
+Only M0 is in progress. Each milestone begins only after the previous one is
+accepted.
 
-The CloudNativePG project tracks its high-level roadmap publicly using
-[GitHub Projects](https://docs.github.com/en/issues/planning-and-tracking-with-projects/learning-about-projects/about-projects).
-This [board](https://github.com/orgs/cloudnative-pg/projects/1/views/1)
-provides the most current view of major initiatives, features, and significant
-improvements we are actively tracking for future releases.
+## M0 — fork hygiene, authority audit, and the process decision
 
-You can view our active roadmap here:
-[CloudNativePG Public Roadmap](https://github.com/orgs/cloudnative-pg/projects/1/views/1)
+Establish a maintainable fork, prove the inherited high-availability paths are
+understood, and decide the Pod process model before committing to it.
 
-## How we plan our work
+Work: fork from CloudNativePG 1.30.0 with a documented upstream merge process; a
+reproducible build of the operator and database images; Patroni packaged and
+version-reported; an authority-audit document covering every
+high-availability and process-control path; a responsibility map from the
+inherited instance manager to the Patroni container, a finite init, the agent,
+the operator, or "disabled"; a lifecycle-root container prototype and the
+minimal supervisor comparison ADR-002 needs; a process-model fault matrix with
+measured results; runtime and static guardrails; a plan for validating
+unsupported fields; and the initial architecture decision records accepted.
 
-Our roadmap is a living document that evolves with the project, our community's
-needs, and the availability of our contributors.
+Exit: ADR-002 accepted with pros, cons, measurements, and explicit
+non-guarantees; reviewers agree there is a concrete plan to make every inherited
+high-availability path unreachable; CI proves the fork builds and inherited unit
+tests run; no broad rename or feature work obscures the architecture diff.
 
-We use two main tools in GitHub for planning:
+## M1 — a Patroni-owned three-node cluster
 
-1. GitHub Projects: as linked above, this is used for our high-level,
-   strategic roadmap. It helps visualize the status of major work items (epics,
-   features) over a longer time horizon.
+Create a fresh cluster in which Patroni alone starts Postgres and elects a
+leader: Patroni as the database-container lifecycle process, startup ending in
+`exec patroni`, retained Pod-local facilities moved to a finite init, the agent,
+the operator, or removed, three Pods and PVCs from a minimal resource, Patroni
+`initdb` and `pg_basebackup` bootstrap, the Kubernetes distributed configuration
+store, a selectorless write Service following the Patroni leader, and leader and
+member state mirrored into status.
 
-2. GitHub Milestones: these are used for more granular, tactical planning.
-   Milestones are tied to specific upcoming releases (e.g., `v1.28.0`) and
-   contain the collection of issues and pull requests targeted for that
-   version.
+Exit: exactly one instance reports as primary; two replicas stream from the
+leader; deleting the operator and the agents does not affect Patroni's high
+availability; Patroni exiting terminates the database container and leaves no
+postmaster; no inherited primary Lease exists.
 
-### How items are prioritized
+## M2 — container lifecycle, probes, and routing
 
-New work items (issues) are typically added to the roadmap or a specific
-milestone based on the following drivers:
+Make process failures and Service behaviour fail closed within the accepted
+standard-mode fault model: Patroni process exit coupled to container exit;
+direct Patroni startup, liveness, and readiness probes with a tested timing
+budget; signal and shutdown tests; Patroni-derived role labels and read
+Services; retained metrics and log integration rebased on the agent and Patroni;
+authenticated Patroni REST over TLS; and the former-primary rewind or
+reinitialize path.
 
-- **Community and End-User Requests:** We actively monitor GitHub issues.
-  Feature requests, bug reports, and improvements suggested by our end-users
-  are a primary source of work.
+Exit: `SIGKILL`, out-of-memory, and kubelet-healthy `SIGSTOP` scenarios leave no
+writable Postgres process behind; agent failure has no high-availability effect;
+stale write routing reaches only a demoted or stopped former primary; the former
+primary rejoins as a replica.
 
-- **Maintainer and Contributor Interest:** Work is often initiated based on the
-  personal interest and availability of our maintainers and core contributors.
+## M3 — the chaos safety gate
 
-- **Real-World Use Cases:** Many contributions are driven by the real-world
-  needs of organizations that use CloudNativePG in production. This often
-  includes requests originating from customers or internal teams of the
-  organizations that employ our maintainers.
+Pass the complete spike fault model: the direct-write oracle, all twelve chaos
+scenarios including the reproduction of the partition reported in CloudNativePG
+issue #7407, artifact collection, a 100-iteration timing-boundary run, a
+two-hour soak, and a written safety and limitations report.
 
-- *LFX Mentorship Program:** As active participants in the CNCF's LFX
-  Mentorship program, we also identify and scope specific features or
-  improvements as dedicated projects for mentees.
+Exit: no round produces acknowledged commits from two Patroni-authorized
+primaries; no reachable inherited high-availability path is observed; ambiguous
+and unsupported cases are documented rather than hidden.
 
-All planning is ultimately dependent on the **availability of our maintainers
-and contributors** to champion an issue, develop the code, and see it through
-the review process.
+## M4 — alpha ergonomics
 
-### Adjusting scope and releases
+Begins only after M3 is accepted, and requires separate approval. Candidate
+work: supported configuration reconciliation through Patroni; manual switchover;
+scale up and down; rolling restarts; one backup and recovery path; the API-group
+rename and co-installation testing; and a wider Postgres and Kubernetes matrix.
 
-Our planning is iterative. If a feature or fix targeted for a specific
-milestone proves to be more complex than anticipated or resources are not
-available, its timeline may be adjusted.
+## How work is prioritised
 
-Decisions to defer an item (move it to a later release) are discussed and
-voted on by maintainers directly within the relevant GitHub issue.
+By what the next milestone's exit criteria require. Anything that does not serve
+them is deferred, including renames, branding, and features — the specification
+is explicit that no rename or feature work may obscure the architecture diff
+during the spike.
+
+> CloudNativePatroni is an independent project derived from CloudNativePG. It is not affiliated
+> with or endorsed by CloudNativePG, CNCF, LF Projects, or the Patroni maintainers.

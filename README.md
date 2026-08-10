@@ -1,178 +1,291 @@
-[![CNCF Landscape](https://img.shields.io/badge/CNCF%20Landscape-5699C6)][cncf-landscape]
-[![Latest Release](https://img.shields.io/github/v/release/cloudnative-pg/cloudnative-pg.svg)][latest-release]
-[![GitHub License](https://img.shields.io/github/license/cloudnative-pg/cloudnative-pg)][license]
-[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9933/badge)][openssf]
-[![OpenSSF Baseline](https://www.bestpractices.dev/projects/9933/baseline)][openssf]
-[![OpenSSF Scorecard Badge][openssf-scorecard-badge]][openssf-socrecard-view]
-[![Documentation][documentation-badge]][documentation]
-[![Stack Overflow](https://img.shields.io/badge/stackoverflow-cloudnative--pg-blue?logo=stackoverflow&logoColor=%23F48024&link=https%3A%2F%2Fstackoverflow.com%2Fquestions%2Ftagged%2Fcloudnative-pg)][stackoverflow]
-[![FOSSA Status][fossa-badge]][fossa]
-[![CLOMonitor](https://img.shields.io/endpoint?url=https://clomonitor.io/api/projects/cncf/cloudnative-pg/badge)](https://clomonitor.io/projects/cncf/cloudnative-pg)
-[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/cloudnative-pg)](https://artifacthub.io/packages/search?repo=cloudnative-pg)
+# CloudNativePatroni
 
-# Welcome to the CloudNativePG Project!
+<!--
+  LOGO PLACEHOLDER — do not fill in by hand.
+  The brand workstream owns the CloudNativePatroni mark and will replace this
+  comment with the logo markup and its alt text. Until then this README ships
+  without any image, deliberately: no CloudNativePG, CNCF, or vendor artwork
+  may appear here.
+-->
 
-**CloudNativePG (CNPG)** is an open-source platform designed to seamlessly
-manage [PostgreSQL](https://www.postgresql.org/) databases in Kubernetes
-environments. It covers the entire operational lifecycle—from deployment to
-ongoing maintenance—through its core component, the CloudNativePG operator.
+A Kubernetes operator for Postgres in which upstream Patroni is the sole
+high-availability authority. CloudNativePatroni is derived from CloudNativePG
+and keeps its operator surface, while delegating Postgres process lifecycle,
+leader election, promotion, demotion, replication topology, and former-primary
+recovery to Patroni.
 
-## Table of Contents
+> CloudNativePatroni is an independent project derived from CloudNativePG. It is not affiliated
+> with or endorsed by CloudNativePG, CNCF, LF Projects, or the Patroni maintainers.
 
-- [Code of Conduct](CODE_OF_CONDUCT.md)
-- [Governance Policies](https://github.com/cloudnative-pg/governance/blob/main/GOVERNANCE.md)
-- [Contributing](CONTRIBUTING.md)
-- [Adopters](ADOPTERS.md)
-- [Commercial Support](https://cloudnative-pg.io/support/)
-- [License](LICENSE)
+## Project status
 
-## Getting Started
+**Pre-alpha architecture spike. Not production software. Not usable today.**
 
-The best way to get started is the [Quickstart Guide](https://cloudnative-pg.io/docs/devel/quickstart/).
+- Nothing works yet. The fork is at milestone M0, whose deliverables are fork
+  hygiene, an audit of the inherited high-availability code paths, and an
+  accepted architecture decision record for the Pod process model. No
+  Patroni-managed cluster can be created from this repository at this time.
+- There are no releases, no published images, no installation instructions, and
+  no upgrade path. Do not deploy this.
+- The architecture described below is a target, not an implementation. The
+  process model in particular is subject to ADR-002, which is **proposed and not
+  yet accepted**.
+- Out of scope for the spike, per specification section 5.3: converting an
+  existing CloudNativePG cluster in place; backup, point-in-time recovery,
+  scheduled backups, volume snapshots, and CNPG-I plugins; major Postgres
+  upgrades; cross-region and standby clusters; synchronous replication; the
+  Pooler, Database, DatabaseRole, Publication, and Subscription resources;
+  alternative distributed configuration stores; a Patroni fork; and any support
+  or service-level commitment.
+- Milestones, per specification section 16: **M0** fork hygiene, authority
+  audit, and the process ADR; **M1** a Patroni-owned three-node cluster; **M2**
+  container lifecycle, probes, and routing; **M3** the chaos safety gate; **M4**
+  alpha ergonomics, which begins only after M3 is accepted. Only M0 is in
+  progress.
 
-## Scope
+## Why this project exists
 
-### Mission
+### The claim, and what it is not
 
-CloudNativePG aims to increase PostgreSQL adoption within Kubernetes by making
-it an integral part of the development process and GitOps-driven CI/CD
-automation.
+Running Patroni underneath a Kubernetes operator is a well-trodden,
+production-proven model. Crunchy Data PGO, StackGres, and Zalando's
+postgres-operator all use Patroni for high availability. CloudNativePG is the
+outlier in implementing its own.
 
-### Core Principles & Features
+CloudNativePatroni therefore does not claim to invent an architecture. It claims
+something narrower: that CloudNativePG's operator surface — its declarative API,
+its resource and lifecycle machinery, and the ecosystem built around it — is
+worth keeping, and that its self-implemented high-availability layer is not. The
+fork exists to combine the first with Patroni, rather than to rebuild the
+operator surface that adopting an existing Patroni-based operator would ask us
+to give up.
 
-Designed by PostgreSQL experts for Kubernetes administrators, CloudNativePG
-follows a Kubernetes-native approach to PostgreSQL primary/standby cluster
-management. Instead of relying on external high-availability tools (like
-Patroni, repmgr, or Stolon), it integrates directly with the Kubernetes API to
-automate database operations that a skilled DBA would perform manually.
+### The difference in where write authority is proven
 
-Key design decisions include:
+CloudNativePG arbitrates failover through the control plane: the operator
+decides which instance is primary and records that decision. An instance that
+loses connectivity to the Kubernetes API has no obligation to prove it still
+holds that authority, and can keep accepting writes while the remaining side
+promotes a replacement. Service label changes do not stop it, because stale
+kube-proxy state and workloads inside the isolated partition — including jobs
+running inside Postgres itself — can still reach the old primary. This is the
+failure reported in
+[CloudNativePG issue #7407](https://github.com/cloudnative-pg/cloudnative-pg/issues/7407)
+and described in specification section 3.2.
 
-- Direct integration with Kubernetes API: The PostgreSQL cluster’s status is
-  available directly in the `Cluster` resource, allowing users to inspect it
-  via the Kubernetes API.
-- Operator pattern: The operator ensures that the desired PostgreSQL state is
-  reconciled automatically, following Kubernetes best practices.
-- Immutable application containers: Updates follow an immutable infrastructure
-  model, as explained in
-  ["Why EDB Chose Immutable Application Containers"](https://www.enterprisedb.com/blog/why-edb-chose-immutable-application-containers).
+Patroni's model places the proof on the instance. A node may remain primary only
+while it can renew the leader lock in the distributed configuration store, or
+while failsafe mode confirms it can still reach every known member. Otherwise
+Patroni demotes Postgres locally, before another member can win leadership.
 
-### How CloudNativePG Works
+### The argument is not one issue
 
-The operator continuously monitors and updates the PostgreSQL cluster state.
-Examples of automated actions include:
+Issue #7407 is a symptom, and repairing it is not the objective. The objective
+is to stop reimplementing Postgres high availability. Patroni carries roughly
+fifteen years of accumulated production behaviour that any self-implemented
+high-availability layer must otherwise rediscover, including:
 
-- Failover management: If the primary instance fails, the operator elects a new
-  primary, updates the cluster status, and orchestrates the transition.
-- Scaling read replicas: When the number of desired replicas changes, the
-  operator provisions or removes resources such as persistent volumes, secrets,
-  and config maps while managing streaming replication.
-- Service updates: Kubernetes remains the single source of truth, ensuring
-  that PostgreSQL service endpoints are always up to date.
-- Rolling updates: When an image is updated, the operator follows a rolling
-  strategy—first updating replica pods before performing a controlled
-  switchover for the primary.
+- distributed-configuration-store failsafe mode;
+- watchdog keepalive tied to leader-lock renewal;
+- `pg_rewind` safety, including checkpoint-before-rewind, diverged-timeline
+  detection, non-superuser rewind grants, the `wal_log_hints` and data-checksum
+  preconditions, and the data-directory removal policy;
+- timeline and history-file checks before following a leader;
+- candidate eligibility through `maximum_lag_on_failover`, `failover_priority`,
+  and `nofailover`;
+- the LSN-comparison leader race;
+- crash-recovery semantics driven by `pg_controldata` that refuse to restart a
+  possibly diverged former primary as leader;
+- quorum commit and `synchronous_mode_strict`;
+- permanent replication slots, and slot-position advancing on replicas so slots
+  survive failover;
+- `pending_restart` tracking with per-major-version parameter validation;
+- `pause` for maintenance without stopping Postgres.
 
-CloudNativePG manages additional Kubernetes resources to enhance PostgreSQL
-management, including: `Backup`, `ClusterImageCatalog`, `Database`,
-`ImageCatalog`, `Pooler`, `Publication`, `ScheduledBackup`, and `Subscription`.
+Adding a fence to a self-implemented layer would deliver the leader lock alone
+and leave every item above to be built and maintained here.
 
-## Out of Scope
+### The counter-argument, stated honestly
 
-- **Kubernetes only:** CloudNativePG is dedicated to vanilla Kubernetes
-  maintained by the [Cloud Native Computing Foundation
-  (CNCF)](https://kubernetes.io/).
-- **PostgreSQL only:** CloudNativePG is dedicated to vanilla PostgreSQL
-  maintained by the [PostgreSQL Global Development Group
-  (PGDG)](https://www.postgresql.org/about/).
-- **No support for forks:** Features from PostgreSQL forks will only be
-  considered if they can be integrated as extensions or pluggable frameworks.
-- **Not a general-purpose database operator:** CloudNativePG does not support
-  other databases (e.g., MariaDB).
+Crunchy Data PGO, StackGres, and Zalando postgres-operator already work. For
+anyone who does not specifically need CloudNativePG's API, resource model, and
+ecosystem, adopting one of them is the cheaper path, and this project does not
+argue otherwise. The case for CloudNativePatroni rests entirely on wanting to
+keep that particular operator surface. If you do not, one of those projects is
+the better choice.
 
-CloudNativePG can be extended via the [CNPG-I plugin interface](https://github.com/cloudnative-pg/cnpg-i).
+### Why a fork rather than a contribution
 
-## Communications
+Adopting Patroni would place a Python runtime in the database image and replace
+a subsystem that CloudNativePG has deliberately chosen to own, so it is not a
+change that project is likely to accept; that is a description of a design
+difference, not a criticism of it.
 
-Please refer to the [Getting in touch](https://github.com/cloudnative-pg#getting-in-touch)
-section on the GitHub organization page.
+### What is not claimed
 
-## Community Meetings
+- **No universal split-brain impossibility guarantee.** Without a functioning
+  watchdog or an external fence, specification section 12.3 lists cases the
+  project explicitly does not cover: complete VM or node pause and later resume;
+  a frozen container cgroup; Patroni suspended while kubelet is stopped, hung,
+  or unable to execute probes; kernel hangs; storage that acknowledges writes
+  incorrectly; Byzantine networking or Kubernetes API behaviour; a compromised
+  root account or a process that deliberately bypasses Patroni; and failure to
+  stop Postgres before lock expiration when the whole local safety stack is
+  stalled.
+- **Preventing two writable primaries is not zero data loss.** The spike uses
+  asynchronous replication. Acknowledged commits may be lost during failover if
+  they were not replicated to the promoted standby. `maximum_lag_on_failover`
+  bounds candidate eligibility; it is not a recovery-point guarantee.
+  Specification sections 4.6 and 12.5 separate high-availability safety from
+  durability, and durability policy is a later design with its own test matrix.
 
-Everyone is welcome, no invitation needed. For details, see the
-[Community Meetings](https://github.com/cloudnative-pg#cloudnativepg-community-meetings)
-section on the GitHub organization page.
+## Architecture summary
 
-## Resources
+### The single-authority rule
 
-- [Roadmap](ROADMAP.md)
-- [Website](https://cloudnative-pg.io)
-- [FAQ](docs/src/faq.md)
-- [Blog](https://cloudnative-pg.io/blog/)
-- [CloudNativePG plugin Interface (CNPG-I)](https://github.com/cloudnative-pg/cnpg-i).
+Specification section 4.1 is normative and is quoted here verbatim. At all times
+there is exactly one component with authority to decide whether PostgreSQL may
+be writable: **Patroni**.
 
-## Adopters
+```text
+For every instance and every time t:
 
-A list of publicly known users of the CloudNativePG operator is in [ADOPTERS.md](ADOPTERS.md).
-Help us grow our community and CloudNativePG by adding yourself and your
-organization to this list!
+PostgreSQL may be primary and accept writes
+only if local Patroni considers itself primary
+and holds valid write authority under Patroni's DCS rules.
+```
 
-### CloudNativePG at KubeCon
+The operator, the integration agent, kubelet, the container runtime, and any
+optional minimal init may observe state or remove availability by terminating a
+process or container. They must not grant write authority, promote Postgres, or
+restart Postgres independently of Patroni.
 
-- March 25, 2026, KubeCon Europe 2026 in Amsterdam: ["Cloud Native Theater / Data on Kubernetes Day: From VMs to Kubernetes in a Large Global Bank: A DBA's Journey"](https://kccnceu2026.sched.com/event/2EG01/cloud-native-theater-data-on-kubernetes-day-from-vms-to-kubernetes-in-a-large-global-bank-a-dbas-journey-gabriele-bartolini-edb-laurent-parodi-hsbc) - Gabriele Bartolini, EDB & Laurent Parodi, HSBC
-- March 23, 2026, Data on Kubernetes Day at KubeCon Europe 2026 in Amsterdam: ["Beyond the DBaaS Trap: Achieving Data Sovereignty with Kubernetes and CloudNativePG"](https://colocatedeventseu2026.sched.com/event/2H5Uc/beyond-the-dbaas-trap-achieving-data-sovereignty-with-kubernetes-and-cloudnativepg-floor-drees-gabriele-bartolini-edb) - Floor Drees & Gabriele Bartolini, EDB
-- March 23, 2026, KubeCon Europe 2026 in Amsterdam: ["Project Lightning Talk: Five Minutes by CloudNativePG River"](https://kccnceu2026.sched.com/event/2EWIB/project-lightning-talk-five-minutes-by-cloudnativepg-river-gabriele-quaresima-contributor) - Gabriele Quaresima, Contributor
-- November 10, 2025, KubeCon North America 2025 in Atlanta: ["Project Lightning Talk: CloudNativePG: Running Postgres The Kubernetes Way"](https://www.youtube.com/watch?v=pYwYwehQX3U&t=4s) - Gabriele Bartolini, EDB
-- November 11, 2025, KubeCon North America 2025 in Atlanta: ["Modern PostgreSQL Authorization With Keycloak: Cloud Native Identity Meets Database Security"](https://www.youtube.com/watch?v=TYgPemq06fg) - Yoshiyuki Tabata, Hitachi, Ltd. & Gabriele Bartolini, EDB
-- November 13, 2025, KubeCon North America 2025 in Atlanta: ["Quorum-Based Consistency for Cluster Changes With CloudNativePG Operator"](https://www.youtube.com/watch?v=iQUOO3-JRK4&list=PLj6h78yzYM2MLSW4tUDO2gs2pR5UpiD0C&index=67) - Jeremy Schneider, GEICO Tech & Gabriele Bartolini, EDB
-- April 4, 2025, KubeCon Europe in London: ["Consistent Volume Group Snapshots, Unraveling the Magic"](https://sched.co/1tx8g) - Leonardo Cecchi (EDB) and Xing Yang (VMware)
-- November 11, 2024, Cloud Native Rejekts NA 2024: ["Maximising Microservice Databases with Kubernetes, Postgres, and CloudNativePG"](https://www.youtube.com/watch?v=uBzl_stoxoc&ab_channel=CloudNativeRejekts) - Gabriele Bartolini (EDB) and Leonardo Cecchi (EDB)
-- March 21, 2024, KubeCon Europe 2024 in Paris: ["Scaling Heights: Mastering Postgres Database Vertical Scalability with Kubernetes Storage Magic"](https://kccnceu2024.sched.com/event/1YeM4/scaling-heights-mastering-postgres-database-vertical-scalability-with-kubernetes-storage-magic-gabriele-bartolini-edb-gari-singh-google) - Gari Singh, Google & Gabriele Bartolini, EDB
-- March 19, 2024, Data on Kubernetes Day at KubeCon Europe 2024 in Paris: ["From Zero to Hero: Scaling Postgres in Kubernetes Using the Power of CloudNativePG"](https://colocatedeventseu2024.sched.com/event/1YFha/from-zero-to-hero-scaling-postgres-in-kubernetes-using-the-power-of-cloudnativepg-gabriele-bartolini-edb) - Gabriele Bartolini, EDB
-- November 7, 2023, KubeCon North America 2023 in Chicago: ["Disaster Recovery with Very Large Postgres Databases (in Kubernetes)"](https://kccncna2023.sched.com/event/1R2ml/disaster-recovery-with-very-large-postgres-databases-gabriele-bartolini-edb-michelle-au-google) - Michelle Au, Google & Gabriele Bartolini, EDB
-- October 27, 2022, KubeCon North America 2022 in Detroit: ["Data On Kubernetes, Deploying And Running PostgreSQL And Patterns For Databases In a Kubernetes Cluster"](https://kccncna2022.sched.com/event/182GB/data-on-kubernetes-deploying-and-running-postgresql-and-patterns-for-databases-in-a-kubernetes-cluster-chris-milsted-ondat-gabriele-bartolini-edb) - Chris Milsted, Ondat & Gabriele Bartolini, EDB
+### Process and container model
 
-### Useful links
+The target Pod layout, compressed from specification section 7.1:
 
-- ["Quorum-Based Consistency for Cluster Changes With CloudNativePG Operator"](https://www.youtube.com/watch?v=sRF09UMAlsI) (webinar) - Jeremy Schneider, GEICO Tech & Leonardo Cecchi, EDB
-- [Data on Kubernetes (DoK) Community](https://dok.community/)
-- ["Cloud Neutral Postgres Databases with Kubernetes and CloudNativePG" by Gabriele Bartolini](https://www.cncf.io/blog/2024/11/20/cloud-neutral-postgres-databases-with-kubernetes-and-cloudnativepg/) (November 2024)
-- ["How to migrate your PostgreSQL database in Kubernetes with ~0 downtime from anywhere" by Gabriele Bartolini](https://gabrielebartolini.it/articles/2024/03/cloudnativepg-recipe-5-how-to-migrate-your-postgresql-database-in-kubernetes-with-~0-downtime-from-anywhere/) (March 2024)
-- ["Maximizing Microservice Databases with Kubernetes, Postgres, and CloudNativePG" by Gabriele Bartolini](https://gabrielebartolini.it/articles/2024/02/maximizing-microservice-databases-with-kubernetes-postgres-and-cloudnativepg/) (February 2024)
-- ["Recommended Architectures for PostgreSQL in Kubernetes" by Gabriele Bartolini](https://www.cncf.io/blog/2023/09/29/recommended-architectures-for-postgresql-in-kubernetes/) (September 2023)
-- ["The Current State of Major PostgreSQL Upgrades with CloudNativePG" by Gabriele Bartolini](https://www.enterprisedb.com/blog/current-state-major-postgresql-upgrades-cloudnativepg-kubernetes) (August 2023)
-- ["The Rise of the Kubernetes Native Database" by Jeff Carpenter](https://thenewstack.io/the-rise-of-the-kubernetes-native-database/) (December 2022)
-- ["Why Run Postgres in Kubernetes?" by Gabriele Bartolini](https://cloudnativenow.com/kubecon-cnc-eu-2022/why-run-postgres-in-kubernetes/) (May 2022)
-- ["Shift-Left Security: The Path To PostgreSQL On Kubernetes" by Gabriele Bartolini](https://www.tfir.io/shift-left-security-the-path-to-postgresql-on-kubernetes/) (April 2021)
-- ["Local Persistent Volumes and PostgreSQL usage in Kubernetes" by Gabriele Bartolini](https://www.2ndquadrant.com/en/blog/local-persistent-volumes-and-postgresql-usage-in-kubernetes/) (June 2020)
+```text
+Kubernetes Pod
+|
++-- config-init (optional, finite)
+|
++-- patroni container (main database container)
+|   |
+|   +-- minimal init (optional; signal forwarding and reaping only)
+|       |
+|       +-- Patroni (container lifecycle root)
+|           |
+|           +-- PostgreSQL postmaster
+|
++-- cnpatroni-agent container (sidecar; no HA or process authority)
+```
 
----
+The numeric PID is not the invariant. Patroni may be PID 1, or the direct child
+of a transparent init such as `tini`. The invariant is that no long-lived
+wrapper may remain healthy after Patroni exits and thereby leave the database
+container or Postgres running. Patroni and Postgres run in the same container
+and cgroup; the integration agent is a separate container so that its failure or
+restart cannot keep an unsupervised Postgres process alive.
 
-<p align="center">
-We are a <a href="https://www.cncf.io/sandbox-projects/">Cloud Native Computing Foundation Sandbox project</a>.
-</p>
+**This model is subject to ADR-002, which is proposed and not yet accepted.**
+The alternative under evaluation retains a CloudNativePG-derived supervisor as
+PID 1. Specification section 21 states the decision drivers, the required
+experiment, and the acceptance criteria; the ADR must be accepted during M0.
 
-<p style="text-align:center;" align="center">
-      <picture align="center">
-         <source media="(prefers-color-scheme: dark)" srcset="https://github.com/cncf/artwork/blob/main/other/cncf/horizontal/white/cncf-white.svg?raw=true">
-         <source media="(prefers-color-scheme: light)" srcset="https://github.com/cncf/artwork/blob/main/other/cncf/horizontal/color/cncf-color.svg?raw=true">
-         <img align="center" src="https://github.com/cncf/artwork/blob/main/other/cncf/horizontal/color/cncf-color.svg?raw=true" alt="CNCF logo" width="50%"/>
-      </picture>
-</p>
+### Who owns what
 
----
+Compressed from the authority matrix in specification section 7.3:
 
-<p align="center">
-CloudNativePG was originally built and sponsored by <a href="https://www.enterprisedb.com">EDB</a>.
-</p>
+| Area | Sole owner |
+|---|---|
+| Pod, PVC, Service, Secret, and RBAC lifecycle | Operator |
+| Scheduling, resources, security context | Operator |
+| Postgres process lifecycle | Patroni |
+| Primary election and the leader lock | Patroni |
+| Promotion and demotion | Patroni |
+| Replication topology, slots, `pg_rewind`, reinitialization | Patroni |
+| Dynamic high-availability configuration | Patroni |
+| Write routing | Patroni-managed Endpoint behind a selectorless Service |
+| Read routing | Patroni-derived Pod labels; not a write-safety boundary |
+| Cluster status | Operator, as an observer; informational, never authoritative |
+| Container restart and hang detection | kubelet and the container runtime |
+| Hard local fencing | Patroni watchdog or an external fence, in a future strict mode |
 
-<p style="text-align:center;" align="center">
-      <picture align="center">
-         <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cloudnative-pg/.github/main/logo/edb_landscape_color_white.svg">
-         <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/cloudnative-pg/.github/main/logo/edb_landscape_color_grey.svg">
-         <img align="center" src="https://raw.githubusercontent.com/cloudnative-pg/.github/main/logo/edb_landscape_color_grey.svg" alt="EDB logo" width="25%"/>
-      </picture>
-</p>
+The operator may request a switchover; it never implements one. The distributed
+configuration store, not any field in the resource status, is the source of
+write authority.
+
+## Relationship to the upstream projects
+
+### CloudNativePG
+
+This repository is a fork of [CloudNativePG](https://github.com/cloudnative-pg/cloudnative-pg)
+at release 1.30.0. The inherited code is licensed under Apache-2.0, and the
+inherited documentation under CC BY 4.0. Both licences are preserved:
+[`LICENSE`](LICENSE) covers the repository, [`docs/LICENSE`](docs/LICENSE)
+covers `docs/`, and [`licenses/`](licenses/) carries third-party dependency
+licences. Copyright notices in inherited files are retained unchanged, as
+Apache-2.0 requires for derivative work. [`NOTICE`](NOTICE) records the
+derivation, the attribution CC BY 4.0 requires for adapted documentation, and
+the fact that files have been modified.
+
+The merge policy is continuous upstream tracking rather than a single merge.
+Specification section 20 defines the repository model, the merge policy, and the
+dependency policy; the in-repository documentation for that process is collected
+under [`docs/cnpatroni/`](docs/cnpatroni/) as it lands.
+
+CloudNativePatroni does not use the CloudNativePG name, logo, or visual identity
+as its own branding. It names the project only to describe derivation.
+
+### Patroni
+
+[Patroni](https://github.com/patroni/patroni) is licensed under the MIT licence.
+It is not packaged in this repository yet. When the database image is built,
+Patroni is packaged as an unmodified, pinned upstream release, with dependencies
+pinned by version and hash, and its licence text and attribution ship with that
+image. Behavioural patches to Patroni are not permitted: integration code
+belongs in this repository, and any required change is proposed upstream first.
+
+### The other Patroni-based operators
+
+Crunchy Data PGO, StackGres, and Zalando postgres-operator are named in this
+README because they establish the model this project adopts. StackGres is also
+cited in the specification as a production precedent for the container process
+model. None of these projects is affiliated with CloudNativePatroni, and nothing
+here implies their endorsement.
+
+## Who this is for
+
+**Right now, this repository is for engineers implementing and reviewing the
+fork.** It is useful if you are working through the authority audit, ADR-002,
+the identifier policy, or the upstream integration process, and you need the
+architecture and its constraints in one place.
+
+**It is not for anyone who wants to run Postgres.** If you need a Postgres
+operator today, use one that is released: CloudNativePG, or one of the
+Patroni-based operators named above. This repository has nothing to install.
+
+## Repository orientation
+
+- [`docs/cnpatroni/`](docs/cnpatroni/) — documentation owned by this fork,
+  including the [identifier and naming policy](docs/cnpatroni/naming-policy.md).
+- [`CLAUDE.md`](CLAUDE.md) — the working rules for this repository, including
+  the single-authority rule and the constraint that no broad identifier rename
+  happens yet.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md), [`GOVERNANCE.md`](GOVERNANCE.md),
+  [`MAINTAINERS.md`](MAINTAINERS.md), [`SECURITY.md`](SECURITY.md),
+  [`SUPPORT.md`](SUPPORT.md), [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md),
+  [`ROADMAP.md`](ROADMAP.md) — this project's own statements, not
+  CloudNativePG's.
+- `api/`, `internal/`, `pkg/`, `config/`, `tests/` — inherited CloudNativePG
+  code, unchanged at M0.
+- [`contribute/`](contribute/README.md) — inherited developer documentation,
+  still largely accurate for build and test mechanics.
+
+## Licence
+
+Apache-2.0 for code, CC BY 4.0 for the documentation under `docs/`. See
+[`LICENSE`](LICENSE), [`docs/LICENSE`](docs/LICENSE), and [`NOTICE`](NOTICE).
 
 ---
 
@@ -184,14 +297,5 @@ of Canada, and used with their permission.
 
 ---
 
-[cncf-landscape]: https://landscape.cncf.io/?item=app-definition-and-development--database--cloudnativepg
-[stackoverflow]: https://stackoverflow.com/questions/tagged/cloudnative-pg
-[latest-release]: https://github.com/cloudnative-pg/cloudnative-pg/releases/latest
-[documentation]: https://cloudnative-pg.io/docs
-[license]: https://github.com/cloudnative-pg/cloudnative-pg?tab=Apache-2.0-1-ov-file#readme
-[openssf]: https://www.bestpractices.dev/projects/9933
-[openssf-scorecard-badge]: https://api.scorecard.dev/projects/github.com/cloudnative-pg/cloudnative-pg/badge
-[openssf-socrecard-view]: https://scorecard.dev/viewer/?uri=github.com/cloudnative-pg/cloudnative-pg
-[documentation-badge]: https://img.shields.io/badge/Documentation-white?logo=data%3Aimage%2Fpng%3Bbase64%2CiVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAGN0lEQVR4nJRXXWwcVxU%2B8%2F%2BzP%2BPZtR2v7dqy07jUJUALNaiK6lZyUVVKWgGKaIv8QCMekBAVQlQICcEzVZFQVYFKQhASEBHlISJPCRJEshTFChgrIYHEiYMh69jetffHM7Mzc%2B9Bs7vjnTs7yZpZWbt37s%2F5zne%2Bc861CD0eXRkbHc3NfjeffvxNAGEAgULD2756v35%2B3qe1Nc4fnQVEXlA2LnOcXlCF8S%2B6vvVgq%2FL3M65X3e51PvfQCU4WJgZe%2B8GQ8fS7AKgjBB8KEHwjDXZSjkf0CREAaXM2eI9c65siqWxWl360Xl74ANHz%2Fy8AitxnTBfmz%2BhyYS4wGhwObQCIHSA0AigOMBzvOsXzd4pnjyL6NMmWEH8hi2b28Og3%2FqRJA0ewfQy0v1vGO2NovwPo%2FEU%2FwVgSU1PI%2BSu79v3lJAB8HM%2BTI%2FO%2FUUXzM4xHIe0xI4DdRqOAwnF%2F38ePPyzaDIDh%2FMxcWh462m08aojuGY97C0nrAEHg9BlF0fmeAPr0J15vbaKsp0BZQzEDEAlP9B209UIIVXUta%2FQEQHwxgxFjTc%2BRskAwrgVWmHtg22vMPJwLDqGUNJIAMHVAkGu3WdpZz6NAkgSXpINSycluV28er1a3rJ4M3F2%2F9AtCvXKycRrTQttrjINjxxxIL9jevxdaDHU%2FTBr6pL5ruzuLZubgUQBOY2hPij3GBUe7tBCMBRE2KrXVSz0BBI%2FtPVgtV%2F%2FxkZ5WSjI%2F%2BFIXC3sHJwgT4yFqrZFFTSlVrp3sGYLwcfxSmXCbS00j2Ms4K7qkOsFx6qdTuiHtG4AimfmM8NyvOvR2G48qXtZ2fsfrN7%2BqpcRyUp0glKiimDm4TwAcHBp%2B9WeA4ki0GMWNR9OVF8BZvn7xtI%2FF09H8jzLEgz6yLwCDuelnFXHkTZZOytCOEdqDOtGwsm%2BNj00fXt%2B6%2Bj4vcA7bwNrZwENmXwAKuZnvsNRThs5ozMPfPiHyoDF7xiduHcXb70A8dRFheHjiySQATBZk0nl9MHPkBEWUoEtYjyrPFNwGzfdlD37Zdu98KCv%2BMmD2BYpUCvcST39e0%2BS1Wr249FAAg7mPzWrS5NstEbE0xrsiA6QN1PfRFLnhr%2BspxVJTlY8Mw1DqNXeyCQFREEXz9cHB0QOev73QaNhOF4B%2B45PHFHFgDhJTqjuubJFqX1KQco7NTTuW8kq95k2G4eLEGzM7lfItnjNeTKcOfV%2FT8hOuV77A9IK0XjgMpCO0ZiuV3L%2F6njCFAOmucGB3OII5XgCXEJTDdZLElVbu3Vz0fWexvL30k0B6ggBACOmIUBAEUKX0dDTvW7RCYcdZPq6n%2FSsQnUO2RuyBRgQ9Rc5mMvJ6CNIj1nXfd9qWAsCkaZzJAk1L8UjVqY737dSjfCGrPHWqXL32Q0mB%2F2BXnke00WaEYv2aTzAbnuV5pcWkDGAAGJmhSafh6hjr%2BW2SVYHrP7bb%2BOdPW%2FUgflGlTM2gaK%2Ft7tp6%2BN6yixdN89DcIwGktIFPABfNbwoQqQWEUnDJzg1g0jDeK5p7Kp7nensXFI7uyAr%2FLyM7fYLnpa6LYScE8vDnot5hrKlslm%2BfE3nVxJgO4o3KcYu%2FF8XM8yFQ27n%2F65Te%2FzKl3Jhpjj6TCIDneRD5%2FItxr1vdkALw7p1qfeWPpjHxMtsXaPxu6FLc%2BrnbSB1r7fcrlr36nqwMzQfnplJDryQCGOh%2FbLjhcM%2FEvQ4Pdund9xRV5m1LfTXaF%2BK9gsLGB9nsgddcz8thM%2FarPzYM8%2FFazf9sMFaU%2Fi%2FwvNANwEhPvUGR8ozn7d%2BiDKXixtKpbHp81nV9E7puRy31ixKUbOe%2Fv3Ud891ghhDrL5Z975eaOvV%2BCNRp0Gfz%2BcJjDABdTwlpdfKbId0t5XYAcHz5D5ZVtWUp9%2Flog2L7PgVJqZx0HOE5Cqghemv1%2Bt%2FeGBmZ%2BdB2yNN72UEpnzXG32YADA186i3bIpPxMhuKrFK%2Fd77JUnbkKbYvRJlC8DzKSZK76Lq1he2dKy%2BZuSfesSz5a2xHDbLJ%2BJaqdv5H4EUY%2BzbG2m9HgN7mg81bfw4W1uu7AjvHaqDhqF%2FZ3Fq5XFy%2FcESSDsx5fvZ7wLEsNfXk%2BjlVHfpSCOB%2FAQAA%2F%2F8zd8orZc2N9AAAAABJRU5ErkJggg%3D%3D
-[fossa-badge]: https://app.fossa.com/api/projects/git%2Bgithub.com%2Fcloudnative-pg%2Fcloudnative-pg.svg?type=small
-[fossa]: https://app.fossa.com/projects/git%2Bgithub.com%2Fcloudnative-pg%2Fcloudnative-pg?ref=badge_small
+> CloudNativePatroni is an independent project derived from CloudNativePG. It is not affiliated
+> with or endorsed by CloudNativePG, CNCF, LF Projects, or the Patroni maintainers.
