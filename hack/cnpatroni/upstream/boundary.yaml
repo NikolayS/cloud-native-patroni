@@ -119,6 +119,21 @@ rules:
       Specification 9.4 package layout plus the independent brand assets
       required by owner directive D-1. Created from M1 onward.
 
+  - id: owned.patroni-poc
+    ownership: cnpatroni-owned
+    paths:
+      - poc/**
+    note: >-
+      The walking-skeleton proof of concept: a container image running upstream
+      Patroni as PID 1, the three-node cluster manifests, the read-only write
+      oracle and the chaos harness. The tree did not exist at the fork base and
+      upstream CloudNativePG has no counterpart, so an upstream path arriving
+      here is a name collision, not a merge. Its two Go files that match
+      audit_terms, poc/oracle/internal/bundle/redact.go and
+      poc/chaos/internal/inject/record.go, mention primary_conninfo only inside
+      the evidence-bundle redaction regexes; neither carries high-availability
+      authority.
+
   # ------------------------------------------------------------------- disabled
   - id: disable.pid1-supervisor
     ownership: disabled

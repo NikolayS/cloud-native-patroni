@@ -45,6 +45,9 @@ pkg/patroni/** cnpatroni-boundary=cnpatroni-owned
 tests/chaos/** cnpatroni-boundary=cnpatroni-owned
 brand/** cnpatroni-boundary=cnpatroni-owned
 
+# owned.patroni-poc
+poc/** cnpatroni-boundary=cnpatroni-owned
+
 # disable.pid1-supervisor
 internal/cmd/manager/instance/run/lifecycle/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
 internal/cmd/manager/instance/run/lease/** cnpatroni-boundary=disabled merge=cnpatroni-boundary
