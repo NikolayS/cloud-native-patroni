@@ -1,0 +1,57 @@
+# This manifest is exact target state for later operator generation. It is a
+# walking-skeleton stepping stone, not a substitute for the operator.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cnpatroni-poc-rw
+  namespace: cnpatroni-poc
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+# Patroni is the sole writer of the paired leader Endpoints object. kind has no
+# hardware watchdog, so this PoC's fencing claim remains limited to the DCS.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cnpatroni-poc-rw-config
+  namespace: cnpatroni-poc
+spec:
+  clusterIP: None
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cnpatroni-poc-ro
+  namespace: cnpatroni-poc
+spec:
+  type: ClusterIP
+  selector:
+    cnpatroni.io/podRole: instance
+    cnpatroni.io/cluster: cnpatroni-poc-rw
+    cnpatroni.io/role: replica
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cnpatroni-poc-r
+  namespace: cnpatroni-poc
+spec:
+  type: ClusterIP
+  selector:
+    cnpatroni.io/podRole: instance
+    cnpatroni.io/cluster: cnpatroni-poc-rw
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+      protocol: TCP

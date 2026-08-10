@@ -1,0 +1,37 @@
+# This manifest is exact target state for later operator generation. It is a
+# walking-skeleton stepping stone, not a substitute for the operator.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cnpatroni-poc-1
+  namespace: cnpatroni-poc
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cnpatroni-poc-2
+  namespace: cnpatroni-poc
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cnpatroni-poc-3
+  namespace: cnpatroni-poc
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: standard
+  resources:
+    requests:
+      storage: 2Gi

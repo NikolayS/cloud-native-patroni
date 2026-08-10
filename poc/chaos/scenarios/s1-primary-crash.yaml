@@ -1,0 +1,14 @@
+# This exercises restart in place while the leader still holds the DCS session
+# lock because kubelet restart latency is far below ttl: 30. It exercises no
+# leader election, so a passing s1 is not evidence that failover works. A
+# scenario that forces an election must keep the leader down longer than ttl,
+# and no such scenario exists yet.
+name: s1-primary-crash
+fault: signal-container-init
+signal: KILL
+target: current-leader
+assertions:
+  - no-dual-commit
+  - no-dual-writable
+  - exactly-one-container-restart
+  - no-foreign-endpoint-writer
