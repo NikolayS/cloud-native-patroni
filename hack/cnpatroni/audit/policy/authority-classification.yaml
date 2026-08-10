@@ -1,0 +1,1522 @@
+# The curated half of the CloudNativePatroni HA authority audit.
+#
+# The scanner finds code paths. This file records what we decided to do about
+# each one, and the check cross-references the two in both directions: every hit
+# must appear here, and every entry here must still name a symbol that exists.
+# That second direction is what makes an upstream merge that renames or deletes a
+# function visible rather than silent.
+#
+# class: keep | move | adapt | disable | delete-later      (specification 9.1)
+# dest:  patroni-container | finite-init | cnpatroni-agent | operator | disabled
+#
+# Nothing in this file changes any CloudNativePG code. Milestone M0 records the
+# decisions; the surgery lands in M1, after ADR-002 is accepted.
+
+schema: cnpatroni-authority-classification/v1
+
+defaults:
+  owner: NikolayS
+
+entries:
+
+  # ---------------------------------------------------------------------------
+  # api/v1
+  # ---------------------------------------------------------------------------
+
+  - path: api/v1/cluster_funcs.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/api/v1.(*Cluster).IsInstanceFenced
+    class: delete-later
+    dest: disabled
+    rationale: >-
+      Accessor for the fencing annotation. Harmless on its own, but it is the API
+      surface every fencing caller reaches through, so it is removed once the
+      callers are gone rather than before them, to keep upstream merges cheap.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  # ---------------------------------------------------------------------------
+  # internal/cmd/manager/instance
+  # ---------------------------------------------------------------------------
+
+  - path: internal/cmd/manager/instance/pgbasebackup/cmd.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/pgbasebackup.(*CloneInfo).bootstrapUsingPgbasebackup
+    class: disable
+    dest: disabled
+    rationale: >-
+      Clones a replica with pg_basebackup and then writes its replication
+      topology. Patroni creates replicas through create_replica and owns the
+      recovery configuration that follows.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: internal/cmd/manager/instance/run/cmd.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run.runSubCommand
+    class: adapt
+    dest: cnpatroni-agent
+    rationale: >-
+      Registers thirteen runnables into one controller-runtime manager, of which
+      only four carry HA authority. The file is not deleted: the retained
+      runnables become the agent, and the lifecycle, lease and reaper
+      registrations are removed.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.2"
+
+  - path: internal/cmd/manager/instance/run/lease/runnable.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lease.imports
+    class: disable
+    dest: disabled
+    rationale: >-
+      The package imports client-go leader election. A second leader-election
+      client racing Patroni's DCS lock is the two-authority architecture the
+      specification forbids, so the import itself is the marker.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4, 8.5"
+
+  - path: internal/cmd/manager/instance/run/lease/runnable.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lease.(*Runnable).Acquire
+    class: disable
+    dest: disabled
+    rationale: >-
+      Blocks until the primary Lease is held, which is the gate CloudNativePG
+      opens before promoting. Patroni's leader lock replaces it in full.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.5"
+    guard: ""
+
+  - path: internal/cmd/manager/instance/run/lease/runnable.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lease.(*Runnable).claim
+    class: disable
+    dest: disabled
+    rationale: >-
+      Writes the holder record into the Lease object. This is the exact operation
+      Patroni performs against its own DCS, and doing both means two locks
+      disagree.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.5"
+
+  - path: internal/cmd/manager/instance/run/lease/runnable.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lease.(*Runnable).runLeaderElection
+    class: disable
+    dest: disabled
+    rationale: >-
+      On preemption it returns a fatal error that shuts the manager down and
+      stops PostgreSQL. It is a process-stop authority hidden inside a
+      leader-election loop.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4, 8.5"
+
+  - path: internal/cmd/manager/instance/run/lifecycle/lifecycle.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lifecycle.(*PostgresLifecycle).Start
+    class: disable
+    dest: disabled
+    rationale: >-
+      The supervisor loop that restarts the postmaster forever and translates
+      signals into shutdown modes. Under ADR-002 option A Patroni is the
+      lifecycle root and this loop has no successor.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.1, 8.2"
+
+  - path: internal/cmd/manager/instance/run/lifecycle/run.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lifecycle.(*PostgresLifecycle).runPostgresAndWait
+    class: disable
+    dest: disabled
+    rationale: >-
+      Execs the postmaster as a child of the instance manager and waits on it.
+      This is the ownership inversion the fork exists to remove.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.1"
+
+  - path: internal/cmd/manager/instance/run/lifecycle/reaper.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lifecycle.(*PostgresOrphansReaper).Start
+    class: disable
+    dest: disabled
+    rationale: >-
+      Reaps orphaned postgres children on SIGCHLD, which only makes sense while
+      the instance manager is PID 1. Patroni or a transparent init reaps its own
+      children.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.2"
+
+  # ---------------------------------------------------------------------------
+  # internal/cmd/plugin
+  # ---------------------------------------------------------------------------
+
+  - path: internal/cmd/plugin/fence/fence.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/fence.fencingOn
+    class: disable
+    dest: disabled
+    rationale: >-
+      A user-facing command that stops PostgreSQL by annotation, bypassing both
+      the operator and Patroni. Specification section 12.3 does not carry fencing
+      forward in this form.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: internal/cmd/plugin/fence/fence.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/fence.fencingOff
+    class: disable
+    dest: disabled
+    rationale: >-
+      The unfencing half of the same command. It is listed separately because
+      leaving only the removal path live would let a cluster be unfenced by a
+      mechanism that can no longer fence.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: internal/cmd/plugin/promote/promote.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/promote.Promote
+    class: disable
+    dest: disabled
+    rationale: >-
+      Patches Status.TargetPrimary directly from the kubectl plugin, so a human
+      can drive CloudNativePG's promotion path straight past Patroni. It must
+      become a Patroni switchover request or nothing.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.1"
+
+  - path: internal/cmd/plugin/status/status.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/status.(*PostgresqlStatus).printBasicInfo
+    class: adapt
+    dest: operator
+    rationale: >-
+      Renders the fenced-instance set for display only. It stays, but must read
+      whatever replaces the fencing annotation rather than the annotation itself.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  # ---------------------------------------------------------------------------
+  # internal/controller
+  # ---------------------------------------------------------------------------
+
+  - path: internal/controller/cluster_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).reconcile
+    class: adapt
+    dest: operator
+    rationale: >-
+      The main reconcile loop stays, but the branch that detects a switchover or
+      failover in progress and re-marks the old primary unhealthy is removed with
+      the election engine it belongs to.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.3"
+
+  - path: internal/controller/cluster_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).handleSwitchover
+    class: disable
+    dest: disabled
+    rationale: >-
+      The entry point from the main loop into the election engine. Disabling the
+      engine while leaving its entry point live would produce a reconcile that
+      silently does nothing on failover.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: internal/controller/cluster_create.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).createPrimaryInstance
+    class: adapt
+    dest: operator
+    rationale: >-
+      Creating the first instance is retained work, but it currently sets
+      TargetPrimary before creating the bootstrap Job. The Pod is still created;
+      which instance becomes leader is decided by Patroni's bootstrap.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: internal/controller/cluster_create.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).ensureInstanceBootstrapJob
+    class: adapt
+    dest: operator
+    rationale: >-
+      Refuses to create a Pod whose name differs from TargetPrimary, and
+      defensively writes TargetPrimary so that the instance manager does not shut
+      the primary down. Both guards disappear with the code they protect against.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  - path: internal/controller/cluster_restore.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.ensureClusterIsNotFenced
+    class: disable
+    dest: disabled
+    rationale: >-
+      A restore precondition expressed in terms of the fencing annotation, which
+      has no successor.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: internal/controller/cluster_restore.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.restoreClusterStatus
+    class: disable
+    dest: disabled
+    rationale: >-
+      Chooses the primary from a persistent-volume-claim serial number. A role
+      decision taken from storage metadata is exactly the kind of authority that
+      must not survive the fork.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: internal/controller/cluster_status.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).setPrimaryInstance
+    class: disable
+    dest: disabled
+    rationale: >-
+      The single operator-side writer of Status.TargetPrimary, and the cleanest
+      cut point in the repository. Under CloudNativePatroni the desired primary
+      is never chosen by the operator.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4, 8.12"
+
+  - path: internal/controller/cluster_status.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).updateResourceStatus
+    class: adapt
+    dest: operator
+    rationale: >-
+      Broad status refresh that is worth keeping, except for the branch that
+      rolls TargetPrimary back to CurrentPrimary when the target Pod vanishes.
+      That branch is a role decision and goes.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.12"
+
+  - path: internal/controller/cluster_upgrade.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).rolloutRequiredInstances
+    class: adapt
+    dest: operator
+    rationale: >-
+      Rolling replicas first and deferring the primary is behaviour worth keeping;
+      it must ask Patroni which instance is the leader instead of reading the
+      cluster status.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.12"
+
+  - path: internal/controller/cluster_upgrade.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).switchPrimary
+    class: disable
+    dest: disabled
+    rationale: >-
+      A second switchover engine, independent of the one in replicas.go, that
+      writes TargetPrimary to roll the primary during an upgrade. Two switchover
+      engines is one more than the architecture allows, and both are replaced.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: internal/controller/cluster_upgrade.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).updatePrimaryPod
+    class: disable
+    dest: disabled
+    rationale: >-
+      Chooses between restarting in place, switching over, and deleting the
+      primary Pod, and sets the phases the instance manager obeys. The choice
+      becomes a Patroni switchover request.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.1"
+
+  - path: internal/controller/primary_lease.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).reconcilePrimaryLease
+    class: disable
+    dest: disabled
+    rationale: >-
+      Creates and adopts the coordination.k8s.io Lease that the instance manager
+      then competes for. Specification section 9.2 lists this file, but note the
+      renewal and preemption logic lives in the run/lease package instead.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.5"
+
+  - path: internal/controller/replicas.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).reconcileTargetPrimaryFromPods
+    class: disable
+    dest: disabled
+    rationale: >-
+      The top of the CloudNativePG election engine: it decides whether the
+      situation is a switchover or a failover. Patroni's leader race replaces it.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: internal/controller/replicas.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).reconcileTargetPrimaryForNonReplicaCluster
+    class: disable
+    dest: disabled
+    rationale: >-
+      Picks the most advanced instance as the new primary and writes the pending
+      failover marker. Candidate selection is Patroni's, gated by
+      maximum_lag_on_failover and failover_priority.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: internal/controller/replicas.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).reconcileTargetPrimaryForReplicaCluster
+    class: disable
+    dest: disabled
+    rationale: >-
+      Designated-primary selection for replica clusters. Same authority as the
+      non-replica path, reached through a different branch, so it needs its own
+      cut.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: internal/controller/replicas.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).setPrimaryOnSchedulableNode
+    class: disable
+    dest: disabled
+    rationale: >-
+      Elects a replacement primary while a Node is being drained. A drain is a
+      reason to ask Patroni for a switchover, not a reason for the operator to
+      pick a winner.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.1"
+
+  - path: internal/controller/replicas.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).markOldPrimaryAsUnhealthy
+    class: disable
+    dest: disabled
+    rationale: >-
+      Patches the Pod role label to pull the old primary out of the read-write
+      Service. It is a write-routing decision, and it collides directly with
+      Patroni's own role label.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.1, 8.6"
+
+  - path: internal/controller/replicas_quorum.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).evaluateQuorumCheck
+    class: disable
+    dest: disabled
+    rationale: >-
+      A second, independent safety authority that can permit or deny a failover.
+      Patroni's synchronous mode carries the equivalent guarantee, and two safety
+      authorities is the architecture the specification rules out.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "4.1"
+
+  # ---------------------------------------------------------------------------
+  # internal/management/controller
+  # ---------------------------------------------------------------------------
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).Reconcile
+    class: move
+    dest: cnpatroni-agent
+    rationale: >-
+      The instance-manager main loop. Most of what it orchestrates is safe
+      in-database reconciliation that the agent keeps; the role-transition,
+      fencing and restart branches are removed from it.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.2"
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).reconcilePrimary
+    class: disable
+    dest: disabled
+    rationale: >-
+      Acquires the primary Lease, promotes, and then announces itself as the
+      current primary. It is the whole CloudNativePG promotion sequence in one
+      function.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).handlePromotion
+    class: disable
+    dest: disabled
+    rationale: >-
+      Waits for the WAL receiver to stop and then runs pg_ctl promote. It is the
+      only caller of the promotion primitive, which makes it the second cut point
+      after the primitive itself.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).reconcileOldPrimary
+    class: disable
+    dest: disabled
+    rationale: >-
+      When the target primary is somebody else, it shuts PostgreSQL down
+      immediately so the instance can be demoted. Patroni demotes a former
+      primary through its own crash-recovery and rewind path.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4, 8.13"
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).reconcileDesignatedPrimary
+    class: disable
+    dest: disabled
+    rationale: >-
+      Drives the replica-cluster designated-primary transition by rewriting the
+      replication topology. Topology is Patroni's.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).reconcileClusterRoleWithoutDB
+    class: disable
+    dest: disabled
+    rationale: >-
+      Decides the instance's role before PostgreSQL is reachable, by inspecting
+      the data directory. Deriving a role locally is precisely the race Patroni's
+      DCS lock exists to prevent.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.12"
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).reconcileFencing
+    class: disable
+    dest: disabled
+    rationale: >-
+      Reads the fencing annotation and stops or starts PostgreSQL accordingly. A
+      stop authority that answers to an annotation rather than to the leader lock.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).restartPrimaryInplaceIfRequested
+    class: disable
+    dest: disabled
+    rationale: >-
+      Restarts PostgreSQL in place when the operator sets the in-place restart
+      phase. A restart request must reach Patroni, which knows whether the
+      instance currently holds the leader lock.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.1"
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).triggerRestartForDecrease
+    class: disable
+    dest: disabled
+    rationale: >-
+      Restarts the primary when a hot-standby parameter is decreased. Patroni
+      tracks pending_restart with per-major-version parameter validation and owns
+      the decision.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.11"
+
+  - path: internal/management/controller/instance_controller.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).refreshConfigurationFiles
+    class: disable
+    dest: disabled
+    rationale: >-
+      Writes the PostgreSQL configuration files inside the Pod. Patroni renders
+      them from its own configuration, and two writers to one configuration file
+      is a corruption source, not a race we can arbitrate.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.11"
+
+  - path: internal/management/controller/instance_startup.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).verifyPgDataCoherenceForPrimary
+    class: disable
+    dest: disabled
+    rationale: >-
+      The former-primary recovery routine: it demotes, waits for a switchover,
+      cleans a stale PID file, and runs pg_rewind. Specification section 9.2
+      understates this file; it is the most dangerous single function in the
+      inventory.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4, 8.13"
+
+  - path: internal/management/controller/instance_sync.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).updateFailoverQuorumObject
+    class: disable
+    dest: disabled
+    rationale: >-
+      Publishes the synchronous-replication metadata that the operator's quorum
+      check consumes. It exists only to feed a second safety authority.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "4.1"
+
+  # ---------------------------------------------------------------------------
+  # pkg/management/postgres: the process-control primitives
+  # ---------------------------------------------------------------------------
+
+  - path: pkg/management/postgres/promote.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).PromoteAndWait
+    class: disable
+    dest: disabled
+    rationale: >-
+      Runs pg_ctl promote, waits for standby.signal to disappear and issues a
+      checkpoint. Specification section 7.4 bullet one names this operation
+      directly.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Startup
+    class: disable
+    dest: disabled
+    rationale: >-
+      Starts PostgreSQL with pg_ctl and waits for it. Patroni starts PostgreSQL,
+      including on the paths that only wanted a temporary local instance.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Shutdown
+    class: disable
+    dest: disabled
+    rationale: >-
+      Stops PostgreSQL with pg_ctl in smart, fast or immediate mode. Shutdown
+      mode is part of the failover contract and belongs to whichever component
+      holds the leader lock.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4, 8.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Run
+    class: disable
+    dest: disabled
+    rationale: >-
+      Execs the postmaster directly as a child of the instance manager. This one
+      line is the ownership inversion; everything else in this package follows
+      from it.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.1"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Reload
+    class: disable
+    dest: disabled
+    rationale: >-
+      Reloads or restarts PostgreSQL for a configuration change. Patroni decides
+      whether a parameter change needs a reload or a restart, and when a restart
+      is safe.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.11"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).TryShuttingDownSmartFast
+    class: disable
+    dest: disabled
+    rationale: >-
+      Escalates a smart shutdown to a fast one after a timeout. The escalation
+      policy is part of the shutdown sequence Patroni owns.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).TryShuttingDownFastImmediate
+    class: disable
+    dest: disabled
+    rationale: >-
+      Escalates a fast shutdown to an immediate one. Reaching immediate mode
+      changes what recovery the next start has to perform, so it is not a local
+      decision.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).RequestFastImmediateShutdown
+    class: disable
+    dest: disabled
+    rationale: >-
+      Sends a shutdown command down the in-process instance-command channel. Its
+      only current sender is the former-primary self-shutdown path.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).RequestAndWaitRestartSmartFast
+    class: disable
+    dest: disabled
+    rationale: >-
+      Requests a restart through the command channel and blocks until it
+      completes. Restart is a lifecycle operation, and blocking on it makes the
+      reconciler a process supervisor.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).GetInstanceCommandChan
+    class: disable
+    dest: disabled
+    rationale: >-
+      Exposes the in-process channel through which reconcilers command the
+      supervisor. Removing only the current senders would leave the channel armed
+      for the next upstream merge to reconnect, so the channel goes too.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).HandleInstanceCommandRequests
+    class: disable
+    dest: disabled
+    rationale: >-
+      The receiving half of the command channel: it executes fencing, restart and
+      shutdown requests. It is the code that turns a message into a signal to the
+      postmaster.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).RequestFencingOn
+    class: disable
+    dest: disabled
+    rationale: >-
+      Requests that the instance stop serving while the Pod stays up. It is a
+      stop authority that does not consult the leader lock.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).RequestAndWaitFencingOff
+    class: disable
+    dest: disabled
+    rationale: >-
+      Restarts a fenced instance and waits. Restarting an instance that may have
+      been isolated is exactly the decision Patroni's crash-recovery semantics
+      exist to take.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3, 8.13"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Demote
+    class: disable
+    dest: disabled
+    rationale: >-
+      Writes the replica topology and standby.signal to turn this instance into a
+      follower. Demotion is a role transition and belongs to Patroni alone.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Rewind
+    class: disable
+    dest: disabled
+    rationale: >-
+      Runs pg_rewind with a retry loop. Patroni's use_pg_rewind carries the
+      checkpoint-before-rewind rule, diverged-timeline detection and the
+      data-directory removal policy that this implementation does not.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.13"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).managePgControlFileBackup
+    class: disable
+    dest: disabled
+    rationale: >-
+      Backs up pg_control around a rewind so the rewind can be retried. It is
+      part of the rewind procedure and leaves with it.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.13"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).removePgControlFileBackup
+    class: disable
+    dest: disabled
+    rationale: >-
+      Removes the pg_control backup once a rewind has succeeded. Left alone it
+      would delete state that Patroni's rewind path may still need.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.13"
+
+  - path: pkg/management/postgres/pidfile.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).CleanUpStalePid
+    class: disable
+    dest: disabled
+    rationale: >-
+      Removes a stale postmaster.pid so a start can proceed. Deciding that a PID
+      file is stale is a decision about whether a postmaster is still alive, and
+      getting it wrong starts a second one.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.13"
+
+  - path: pkg/management/postgres/pidfile.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).CheckForExistingPostmaster
+    class: adapt
+    dest: cnpatroni-agent
+    rationale: >-
+      Detects an already-running postmaster. The observation is useful to the
+      agent; the branch that then cleans up and starts one is not.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).WithActiveInstance
+    class: adapt
+    dest: finite-init
+    rationale: >-
+      Starts PostgreSQL, runs a function, and stops it again, which the bootstrap
+      paths use. The pattern survives only inside a finite init that exits, never
+      inside a long-running process.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).isStatusRunning
+    class: adapt
+    dest: cnpatroni-agent
+    rationale: >-
+      Asks pg_ctl status whether the postmaster is alive. Read-only, so it stays,
+      but it must not be used as the basis for starting anything.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).IsPrimary
+    class: adapt
+    dest: cnpatroni-agent
+    rationale: >-
+      Derives the role from the absence of standby.signal. It stays technically
+      correct once Patroni writes that file, but it becomes a race against
+      Patroni's transitions, so callers must ask Patroni instead.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.12"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).GetPrimaryConnInfo
+    class: disable
+    dest: disabled
+    rationale: >-
+      Builds the primary_conninfo string pointing at the read-write Service.
+      Patroni writes primary_conninfo, and it points at the leader it knows about
+      rather than at a Service selector.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4, 8.6"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).PrimaryConnectionPool
+    class: adapt
+    dest: cnpatroni-agent
+    rationale: >-
+      Opens a connection pool to the primary using the connection string above.
+      The pool is retained; the address must come from Patroni.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).WaitForPrimaryAvailable
+    class: delete-later
+    dest: disabled
+    rationale: >-
+      Blocks until the primary answers, as a step of the former-primary recovery
+      routine. Once that routine is gone this has no caller.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  - path: pkg/management/postgres/instance.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).GetSynchronousReplicationMetadata
+    class: disable
+    dest: disabled
+    rationale: >-
+      Reads the custom GUC that carries CloudNativePG's quorum metadata. The GUC
+      itself does not survive, because Patroni's synchronous mode records the
+      same facts in the DCS.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.11"
+
+  - path: pkg/management/postgres/instance_replica.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).RefreshReplicaConfiguration
+    class: disable
+    dest: disabled
+    rationale: >-
+      The entry point for replica topology writes; it branches on the target
+      primary. Every path out of it writes a file Patroni owns.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/instance_replica.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).writeReplicaConfigurationForReplica
+    class: disable
+    dest: disabled
+    rationale: >-
+      Computes this replica's upstream connection information and slot name.
+      Which upstream a replica follows is a topology decision.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/instance_replica.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).writeReplicaConfigurationForDesignatedPrimary
+    class: disable
+    dest: disabled
+    rationale: >-
+      The replica-cluster variant of the same write, pointing at an external
+      cluster. It is listed separately because it survives a naive removal of the
+      ordinary replica path.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/configuration.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.UpdateReplicaConfiguration
+    class: disable
+    dest: disabled
+    rationale: >-
+      Writes the override configuration file and creates standby.signal. It is
+      reached from six call sites across bootstrap, restore and join, which is
+      why it is cut here rather than at each caller.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/configuration.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.createStandbySignal
+    class: disable
+    dest: disabled
+    rationale: >-
+      Creates the file whose presence makes PostgreSQL a standby. The most
+      literal expression of role authority in the repository.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/configuration.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.writePostgresOverrideConfFile
+    class: disable
+    dest: disabled
+    rationale: >-
+      Writes primary_conninfo, primary_slot_name, restore_command and the
+      recovery target into the override file. Four reserved parameters in one
+      function.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.11"
+
+  - path: pkg/management/postgres/configuration.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.createPostgresqlConfiguration
+    class: adapt
+    dest: operator
+    rationale: >-
+      Builds the full custom configuration file from the cluster spec. The
+      rendering is worth keeping, but it must produce Patroni's parameter block
+      rather than a file written into the data directory.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.11"
+
+  - path: pkg/management/postgres/initdb.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(InitInfo).Bootstrap
+    class: disable
+    dest: disabled
+    rationale: >-
+      Runs initdb and then creates the roles and databases. Patroni's bootstrap
+      section performs the equivalent, and doing both leaves two definitions of a
+      freshly created cluster.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: pkg/management/postgres/initdb.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(InitInfo).CreateDataDirectory
+    class: disable
+    dest: disabled
+    rationale: >-
+      Execs initdb to create the data directory. Creating PGDATA is Patroni's
+      bootstrap responsibility.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: pkg/management/postgres/initdb.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(InitInfo).initdbSyncOnly
+    class: disable
+    dest: disabled
+    rationale: >-
+      Runs initdb in sync-only mode after a restore, to flush the data directory.
+      It reaches for the same binary and belongs to the same bootstrap
+      responsibility.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: pkg/management/postgres/join.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.ClonePgData
+    class: disable
+    dest: disabled
+    rationale: >-
+      Clones a data directory with pg_basebackup. Patroni's create_replica
+      handles replica creation, including the choice of method.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: pkg/management/postgres/join.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(InitInfo).Join
+    class: disable
+    dest: disabled
+    rationale: >-
+      Joins a new replica to the cluster and writes its replication topology. The
+      join Job disappears together with the topology write.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: pkg/management/postgres/restore.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(InitInfo).RestoreSnapshot
+    class: disable
+    dest: disabled
+    rationale: >-
+      Demotes the instance after restoring from a volume snapshot. Restore is
+      retained work, but the demotion inside it is a role transition.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/management/postgres/restore.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(InitInfo).concludeRestore
+    class: disable
+    dest: disabled
+    rationale: >-
+      Writes the replication topology once a restore has finished. The restored
+      instance must come up under Patroni, which then decides whether it is a
+      leader.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: pkg/management/postgres/restore.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(InitInfo).ConfigureInstanceAfterRestore
+    class: disable
+    dest: disabled
+    rationale: >-
+      Starts PostgreSQL after a restore to apply fixups. The fixups move into a
+      finite init; starting the server does not move anywhere.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.9"
+
+  - path: pkg/management/postgres/wal.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.ensureWalArchiveIsWorking
+    class: adapt
+    dest: cnpatroni-agent
+    rationale: >-
+      Verifies the WAL archive before allowing progress, and reads recovery
+      settings to do so. The check is retained; its inputs come from Patroni's
+      view of the instance.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  - path: pkg/management/postgres/webserver/remote.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver.(*remoteWebserverEndpoints).updateInstanceManager
+    class: disable
+    dest: disabled
+    rationale: >-
+      Replaces the running instance-manager binary in place while deliberately
+      keeping PostgreSQL alive. It contradicts the rule that the container
+      terminates when its lifecycle root exits.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.3"
+
+  - path: pkg/management/postgres/webserver/remote.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver.(*remoteWebserverEndpoints).failSafe
+    class: delete-later
+    dest: disabled
+    rationale: >-
+      An always-successful endpoint whose only purpose is to disarm the isolation
+      liveness fence. It has no meaning once that fence is gone.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "13.2"
+
+  - path: pkg/management/postgres/webserver/probes/liveness.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/probes.(*livenessExecutor).IsHealthy
+    class: disable
+    dest: disabled
+    rationale: >-
+      On a primary that cannot reach the API server it pings its peers and fails
+      its own liveness on purpose, so that kubelet kills the container. That is a
+      competing implementation of the fence Patroni and kubelet provide.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "13.2"
+
+  - path: pkg/management/postgres/webserver/probes/streaming.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/probes.(pgStreamingChecker).IsHealthy
+    class: adapt
+    dest: patroni-container
+    rationale: >-
+      Classifies the instance by reading the primary_conninfo setting. The
+      readiness question is right; the answer must come from Patroni's REST
+      endpoint.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.8"
+
+  - path: pkg/management/postgres/webserver/metricserver/pg_collector.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/metricserver.newMetrics
+    class: adapt
+    dest: cnpatroni-agent
+    rationale: >-
+      Declares a metric derived from synchronous_standby_names. The exporter
+      stays with the agent, and this one series is either dropped or sourced from
+      Patroni.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "14.2"
+
+  - path: pkg/management/upgrade/upgrade.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/management/upgrade.reloadInstanceManager
+    class: disable
+    dest: disabled
+    rationale: >-
+      Execs a replacement instance-manager binary over the running process. In a
+      container whose lifecycle root is Patroni there is no process here to
+      replace.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.3"
+
+  # ---------------------------------------------------------------------------
+  # pkg/postgres
+  # ---------------------------------------------------------------------------
+
+  - path: pkg/postgres/configuration.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/postgres.CreatePostgresqlConfiguration
+    class: adapt
+    dest: operator
+    rationale: >-
+      Renders the cluster's PostgreSQL parameters, including the synchronous
+      standby names. The renderer is retained and re-targeted at Patroni's
+      parameter block, minus the parameters Patroni reserves.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.11"
+
+  - path: pkg/postgres/replication/replication.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/postgres/replication.GetSynchronousStandbyNames
+    class: disable
+    dest: disabled
+    rationale: >-
+      Dispatches to the explicit or legacy synchronous-standby computation. The
+      whole computation is replaced by Patroni's synchronous mode and quorum
+      commit.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  - path: pkg/postgres/status.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/postgres.(*PostgresqlStatusList).Less
+    class: disable
+    dest: disabled
+    rationale: >-
+      This sort is the election algorithm: primaries first, then by received and
+      replayed log position, and the caller takes the first element as the
+      promotion candidate. A selection rule hidden in a sort implementation is
+      exactly what an upstream merge reintroduces unnoticed.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "7.4"
+
+  # ---------------------------------------------------------------------------
+  # pkg/reconciler, pkg/specs and pkg/utils
+  # ---------------------------------------------------------------------------
+
+  - path: pkg/reconciler/instance/metadata.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/instance.updateRoleLabels
+    class: disable
+    dest: disabled
+    rationale: >-
+      Rewrites the instance role label from the cluster status on every
+      reconcile, and deliberately overwrites the transient unhealthy value.
+      Combined with the read-write Service selector this is a live write-routing
+      authority, not merely an unprotected label.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.1, 8.6"
+
+  - path: pkg/reconciler/persistentvolumeclaim/metadata.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/persistentvolumeclaim.reconcileInstanceRoleLabel
+    class: adapt
+    dest: operator
+    rationale: >-
+      Stamps the role onto the persistent volume claim. Nothing routes on it, so
+      it is retained, but its input must become Patroni's view of the leader.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.12"
+
+  - path: pkg/reconciler/majorupgrade/reconciler.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/majorupgrade.createMajorUpgradeJob
+    class: disable
+    dest: disabled
+    rationale: >-
+      Deletes every Pod and runs pg_upgrade against the primary's volume, while
+      labelling the upgrade Job with an instance role. A major upgrade under
+      Patroni needs its own design and does not inherit this one.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  - path: pkg/reconciler/replicaclusterswitch/reconciler.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/replicaclusterswitch.startTransition
+    class: disable
+    dest: disabled
+    rationale: >-
+      Fences the primary cluster in order to demote it, then produces a demotion
+      token from the shutdown checkpoint. Both halves depend on stopping
+      PostgreSQL at a chosen moment.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: pkg/reconciler/replicaclusterswitch/reconciler.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/replicaclusterswitch.cleanupTransitionMetadata
+    class: disable
+    dest: disabled
+    rationale: >-
+      Removes the fencing metadata once the transition completes. It is the
+      matching unfence and cannot outlive the fence it clears.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: pkg/reconciler/backup/volumesnapshot/offline.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/backup/volumesnapshot.(*offlineExecutor).ensurePodIsFenced
+    class: adapt
+    dest: operator
+    rationale: >-
+      Stops PostgreSQL so that a cold volume snapshot is consistent. This is a
+      legitimate need that fencing currently serves; under CloudNativePatroni it
+      must be expressed as a Patroni request, so the caller is retained and its
+      mechanism replaced.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: pkg/reconciler/backup/volumesnapshot/reconciler.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/backup/volumesnapshot.EnsurePodIsUnfenced
+    class: adapt
+    dest: operator
+    rationale: >-
+      Brings the instance back after a cold snapshot. Retained for the same
+      reason as its counterpart, and re-expressed through the same replacement
+      mechanism.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: pkg/specs/services.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/specs.CreateClusterReadWriteService
+    class: disable
+    dest: disabled
+    rationale: >-
+      The read-write Service selects on the instance role label, so write routing
+      follows whichever component last wrote that label. Specification section
+      8.6 requires it to be selectorless with Patroni owning the endpoints.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.6"
+
+  - path: pkg/specs/pods.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/specs.createPostgresContainers
+    class: adapt
+    dest: patroni-container
+    rationale: >-
+      Hard-codes the database container command as the instance manager, and
+      points the probes at its status port. This is ADR-002's decision point and
+      the smallest experiment surface for it.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.2, 8.8"
+
+  - path: pkg/utils/labels_annotations.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/utils.SetInstanceRole
+    class: disable
+    dest: disabled
+    rationale: >-
+      The single helper through which every writer of the instance role label
+      goes. Cutting here is what makes the label Patroni's, rather than chasing
+      each caller.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "8.1"
+
+  - path: pkg/utils/fencing.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/utils.AddFencedInstance
+    class: disable
+    dest: disabled
+    rationale: >-
+      Adds an instance to the fencing annotation, which is the write that makes a
+      Pod stop serving. It is the lowest point of the fencing machinery.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: pkg/utils/fencing.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/utils.removeFencedInstance
+    class: disable
+    dest: disabled
+    rationale: >-
+      Removes an instance from the same annotation. Listed separately because a
+      partial removal would leave clusters that can be unfenced but not fenced.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: pkg/utils/fencing.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/utils.GetFencedInstances
+    class: adapt
+    dest: operator
+    rationale: >-
+      Reads the fencing annotation. Reading is not authority, and the operator
+      still needs to report a cluster left fenced by an older release, so this
+      one survives the removal of the writers.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: pkg/utils/fencing.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/utils.NewFencingMetadataExecutor
+    class: disable
+    dest: disabled
+    rationale: >-
+      Builds the executor that applies a fencing change to a cluster or an
+      instance. It is the constructor every fencing caller reaches for.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  # ---------------------------------------------------------------------------
+  # tests module
+  #
+  # The end-to-end module is scanned as a first-class root rather than excluded.
+  # Its helpers drive real clusters, so a helper that forces a primary would
+  # quietly defeat the chaos suite that is supposed to prove Patroni is in charge.
+  # ---------------------------------------------------------------------------
+
+  - path: tests/internal/asserts/cluster/cluster.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/tests/internal/asserts/cluster.assertSwitchoverWithHistory
+    class: disable
+    dest: disabled
+    rationale: >-
+      An end-to-end helper that forces a switchover by writing the target primary
+      directly. It has to become a Patroni switchover request, or the suite will
+      keep passing while proving nothing.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "15"
+
+  - path: tests/utils/fencing/fencing.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/tests/utils/fencing.On
+    class: disable
+    dest: disabled
+    rationale: >-
+      Test helper that fences an instance. It follows the production fencing
+      machinery it exercises.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+  - path: tests/utils/fencing/fencing.go
+    symbol: github.com/cloudnative-pg/cloudnative-pg/tests/utils/fencing.Off
+    class: disable
+    dest: disabled
+    rationale: >-
+      The unfencing test helper, retired with its counterpart so that no test can
+      leave a cluster in a state the product can no longer reach.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    spec-ref: "12.3"
+
+# -----------------------------------------------------------------------------
+# The instance-manager responsibility map, which is specification section 9.1's
+# second requirement. A responsibility is a statement about behaviour, so it
+# cannot be generated; the anchors are what keep it honest, because the check
+# reports a row as stale when an anchor stops existing.
+# -----------------------------------------------------------------------------
+
+responsibilities:
+
+  - responsibility: Exec and supervise the postmaster
+    dest: disabled
+    rationale: >-
+      Patroni execs postgres in the same container and cgroup, and the kubelet
+      restarts the container when Patroni exits.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Run
+      - github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lifecycle.(*PostgresLifecycle).Start
+
+  - responsibility: Start, stop, restart and reload PostgreSQL with pg_ctl
+    dest: disabled
+    rationale: >-
+      Every one of these is a lifecycle operation that the component holding the
+      leader lock must take, which is Patroni.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Startup
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Shutdown
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Reload
+
+  - responsibility: Promote a replica
+    dest: disabled
+    rationale: >-
+      Promotion follows from winning the leader race, and the leader race is
+      Patroni's.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).PromoteAndWait
+
+  - responsibility: Reconcile a former primary with pg_rewind and pg_control handling
+    dest: disabled
+    rationale: >-
+      Patroni's use_pg_rewind carries the checkpoint, timeline and precondition
+      rules that a reimplementation has to rediscover one incident at a time.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Rewind
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).managePgControlFileBackup
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).CleanUpStalePid
+
+  - responsibility: Write standby.signal and the replication topology
+    dest: disabled
+    rationale: >-
+      Recovery configuration is Patroni's, and a second writer of these files
+      produces divergence rather than a race that can be arbitrated.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.UpdateReplicaConfiguration
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.createStandbySignal
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).Demote
+
+  - responsibility: Compute and write synchronous_standby_names
+    dest: disabled
+    rationale: >-
+      Patroni's synchronous mode and quorum commit own this parameter, including
+      the strict variant that refuses to fall back to asynchronous replication.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/postgres/replication.GetSynchronousStandbyNames
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/postgres.CreatePostgresqlConfiguration
+
+  - responsibility: Acquire, renew and release the primary Lease
+    dest: disabled
+    rationale: >-
+      The leader lock is Patroni's DCS lock. Holding a second lock in Kubernetes
+      means two locks that can disagree about who is leader.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lease.(*Runnable).Acquire
+      - github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).reconcilePrimaryLease
+
+  - responsibility: Select a promotion candidate and announce the new primary
+    dest: disabled
+    rationale: >-
+      Candidate eligibility in Patroni is expressed through maximum_lag_on_failover,
+      failover_priority and nofailover, and the winner is decided by the leader
+      race rather than by a control-plane sort.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/postgres.(*PostgresqlStatusList).Less
+      - github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).setPrimaryInstance
+      - github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).reconcileTargetPrimaryFromPods
+
+  - responsibility: Write the instance role label that the read-write Service selects on
+    dest: disabled
+    rationale: >-
+      Patroni maintains its own role label. Two writers to the label that routes
+      writes is the failure this fork exists to remove.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/utils.SetInstanceRole
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/reconciler/instance.updateRoleLabels
+
+  - responsibility: Fence an instance through the fencing annotation
+    dest: disabled
+    rationale: >-
+      A stop authority that answers to an annotation rather than to the leader
+      lock. The legitimate uses, such as a cold volume snapshot, become Patroni
+      requests instead.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/utils.AddFencedInstance
+      - github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).reconcileFencing
+
+  - responsibility: Fail liveness deliberately when the API server is unreachable
+    dest: disabled
+    rationale: >-
+      This isolation self-fence is a second implementation of the fence that
+      Patroni's leader-lock renewal and the kubelet provide together.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/probes.(*livenessExecutor).IsHealthy
+
+  - responsibility: Replace the instance-manager binary in place while PostgreSQL keeps running
+    dest: disabled
+    rationale: >-
+      Incompatible with a container whose lifecycle root is Patroni, because
+      there is no long-lived process here to replace.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/upgrade.reloadInstanceManager
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver.(*remoteWebserverEndpoints).updateInstanceManager
+
+  - responsibility: Bootstrap a new cluster and clone replicas
+    dest: disabled
+    rationale: >-
+      Patroni's bootstrap and create_replica sections perform this work, and two
+      definitions of a freshly created cluster is one too many.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(InitInfo).Bootstrap
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(InitInfo).Join
+
+  - responsibility: Reconcile declarative databases, publications, subscriptions and roles
+    dest: cnpatroni-agent
+    rationale: >-
+      Safe in-database reconciliation with no process authority. It stays inside
+      the Pod, but every primary check must ask Patroni rather than read the
+      cluster status.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).Reconcile
+
+  - responsibility: Rotate application and superuser credentials inside PostgreSQL
+    dest: cnpatroni-agent
+    rationale: >-
+      Secret material is applied with ordinary SQL and does not touch the process
+      or the role, so it moves unchanged apart from its primary check.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).refreshCredentialsFromSecret
+
+  - responsibility: Serve the observation payload and the backup remote procedure calls
+    dest: cnpatroni-agent
+    rationale: >-
+      Informational and backup endpoints carry no authority once the probes are
+      repointed, but they must tolerate Patroni restarting PostgreSQL underneath
+      them.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres.(*Instance).GetStatus
+
+  - responsibility: Export metrics from PostgreSQL
+    dest: cnpatroni-agent
+    rationale: >-
+      The exporter keeps working against a server it does not own; only the
+      series derived from CloudNativePG's synchronous topology need rethinking.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/management/postgres/webserver/metricserver.newMetrics
+
+  - responsibility: Relocate the write-ahead log directory and prepare tablespace mount points
+    dest: finite-init
+    rationale: >-
+      Filesystem preparation that must run once before PostgreSQL starts and then
+      exit. The one rule that matters is that it must not become a supervisor.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/internal/management/controller.(*InstanceReconciler).ReconcileTablespaces
+
+  - responsibility: Create the streaming replication user and grant the rewind functions
+    dest: finite-init
+    rationale: >-
+      Patroni needs a replication user and a rewind user with the same grants, so
+      this work survives but has to run where Patroni can find its results.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/internal/cmd/manager/instance/run/lifecycle.configurePgRewindPrivileges
+
+  - responsibility: Answer the startup, readiness and liveness probes
+    dest: patroni-container
+    rationale: >-
+      The kubelet must observe the component that actually owns PostgreSQL, which
+      means Patroni's REST endpoint rather than the instance manager's status
+      port.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/specs.createPostgresContainers
+
+  - responsibility: Write the cluster status, including the current primary and the phases
+    dest: operator
+    rationale: >-
+      The status stays in the control plane but becomes a read-only mirror of
+      what Patroni reports, never an instruction that a Pod-local component obeys.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/internal/controller.(*ClusterReconciler).updateResourceStatus
+
+  - responsibility: Reconcile Pods, volumes, Services, role-based access control and disruption budgets
+    dest: operator
+    rationale: >-
+      This is the CloudNativePG surface the fork exists to keep, and it is
+      unchanged apart from the read-write Service selector.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+    anchors:
+      - github.com/cloudnative-pg/cloudnative-pg/pkg/specs.CreateClusterReadWriteService
+
+# -----------------------------------------------------------------------------
+# Allowlist. There is no inline suppression comment anywhere in this design: an
+# escape hatch written next to the code is invisible in review, so an exception
+# has to be recorded here, with a reason and an owner.
+#
+# Note what is deliberately absent: the future Patroni integration packages are
+# not blanket-allowed. Patroni the process performs the forbidden operations; our
+# Go code does not, in any package.
+# -----------------------------------------------------------------------------
+
+allow:
+
+  - rule: recovery.conninfo
+    package: github.com/cloudnative-pg/cloudnative-pg/pkg/postgres
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/postgres.init
+    reason: >-
+      primary_conninfo and primary_slot_name appear here only as keys in the
+      fixed-parameter denylist, which rejects them in user configuration. That is
+      a prohibition, not a write, and specification section 8.11's reserved
+      parameter list will be built from this same table.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  - rule: sync.standby-names
+    package: github.com/cloudnative-pg/cloudnative-pg/pkg/postgres
+    symbol: github.com/cloudnative-pg/cloudnative-pg/pkg/postgres.init
+    reason: >-
+      synchronous_standby_names is in the same denylist for the same reason. The
+      genuine writer in this package is the configuration renderer, which is
+      classified rather than allowed.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
+
+  - rule: imgr.online-upgrade
+    package: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/psql
+    symbol: github.com/cloudnative-pg/cloudnative-pg/internal/cmd/plugin/psql.execKubectl
+    reason: >-
+      The rule looks for a process replacing itself, and this one replaces the
+      plugin with kubectl on the operator's workstation. It is not inside the
+      database container and carries no PostgreSQL lifecycle authority.
+    reviewed-at: "2026-08-10 01:30:00 UTC"
