@@ -30,21 +30,29 @@ readonly DUPL_TOOL="github.com/mibk/dupl@v1.1.0"
 readonly -a SCAN_UNIT_MODULES=(
   "hack/cnpatroni/upstream"
   "hack/cnpatroni/audit"
+  "poc/oracle"
+  "poc/chaos"
   "."
 )
 readonly -a SCAN_UNIT_DIRECTORIES=(
   "hack/cnpatroni/upstream"
   "hack/cnpatroni/audit"
+  "poc/oracle"
+  "poc/chaos"
   "internal/cnpatroni"
 )
 readonly -a SCAN_UNIT_DEADCODE_ARGUMENTS=(
   "./cmd/..."
   "."
+  "./cmd/..."
+  "./cmd/..."
   $'-test\n-filter=^github\\.com/cloudnative-pg/cloudnative-pg/internal/cnpatroni(?:/.*)?$\n./internal/cnpatroni/...'
 )
 readonly -a SCAN_UNIT_NOTES=(
   "The command packages are the executable roots; internal/gittest is a test-only fixture."
   "The audit module currently has one command package at its module root."
+  "The walking-skeleton write oracle; cmd/oracle is its executable root."
+  "The walking-skeleton chaos harness; cmd/chaos is its executable root."
   "The library test executable supplies the root; the filter keeps findings in scope."
 )
 

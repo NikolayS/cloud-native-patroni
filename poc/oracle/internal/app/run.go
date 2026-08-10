@@ -504,38 +504,66 @@ func (r *nodeRuntime) lineageSnapshot() lineageToken {
 	return r.lineage
 }
 
+// attemptWrite runs one node's write attempt for a round and publishes the
+// result. The synchronous and asynchronous round drivers differ only in the
+// WaitGroup they report completion to, so they share this body: a divergence
+// between them would be a divergence in what the write oracle measures.
+//
+// The deferred calls stay in this order deliberately. Defers run last in,
+// first out, so the in-flight gate is released before the caller's WaitGroup
+// reports the attempt finished.
+func attemptWrite(
+	ctx context.Context,
+	runtime *nodeRuntime,
+	roundID int64,
+	origin time.Time,
+	timeout time.Duration,
+	release <-chan struct{},
+	results chan<- model.Attempt,
+	done *sync.WaitGroup,
+) {
+	defer done.Done()
+	defer runtime.gate.Done()
+	<-release
+	attemptCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	runtime.mu.Lock()
+	conn := runtime.writeConn
+	runtime.mu.Unlock()
+	attempt := postgres.Writer{NodeID: runtime.info.Name, Exec: conn, Origin: origin, Now: time.Now}.Attempt(attemptCtx, roundID)
+	if attempt.Outcome == model.InDoubt && conn != nil {
+		runtime.mu.Lock()
+		if runtime.writeConn == conn {
+			runtime.writeConn = nil
+		}
+		runtime.mu.Unlock()
+		_ = conn.Close(context.Background())
+	}
+	results <- attempt
+}
+
+// noAttempt records that a node's previous write attempt was still in flight
+// when this round fired, so the round holds no measurement for that node. Both
+// round drivers report it identically: a round that silently omitted the node
+// would read as a node that was never asked to write.
+func noAttempt(runtime *nodeRuntime, roundID int64, origin time.Time) model.Attempt {
+	instant := model.Instant(time.Since(origin).Nanoseconds())
+
+	return model.Attempt{RoundID: roundID, NodeID: runtime.info.Name, DispatchAt: instant, SettleAt: instant, Outcome: model.NoAttempt, Error: "previous attempt is still in flight"}
+}
+
 func executeRound(ctx context.Context, runtimes []*nodeRuntime, roundID int64, origin time.Time, timeout time.Duration) RoundEvidence {
 	release := make(chan struct{})
 	results := make(chan model.Attempt, len(runtimes))
 	var wg sync.WaitGroup
 	for _, runtime := range runtimes {
 		if !runtime.gate.TryStart() {
-			now := time.Now()
-			instant := model.Instant(now.Sub(origin).Nanoseconds())
-			results <- model.Attempt{RoundID: roundID, NodeID: runtime.info.Name, DispatchAt: instant, SettleAt: instant, Outcome: model.NoAttempt, Error: "previous attempt is still in flight"}
+			results <- noAttempt(runtime, roundID, origin)
+
 			continue
 		}
 		wg.Add(1)
-		go func(runtime *nodeRuntime) {
-			defer wg.Done()
-			defer runtime.gate.Done()
-			<-release
-			attemptCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			runtime.mu.Lock()
-			conn := runtime.writeConn
-			runtime.mu.Unlock()
-			attempt := postgres.Writer{NodeID: runtime.info.Name, Exec: conn, Origin: origin, Now: time.Now}.Attempt(attemptCtx, roundID)
-			if attempt.Outcome == model.InDoubt && conn != nil {
-				runtime.mu.Lock()
-				if runtime.writeConn == conn {
-					runtime.writeConn = nil
-				}
-				runtime.mu.Unlock()
-				_ = conn.Close(context.Background())
-			}
-			results <- attempt
-		}(runtime)
+		go attemptWrite(ctx, runtime, roundID, origin, timeout, release, results, &wg)
 	}
 	close(release)
 	wg.Wait()
@@ -559,32 +587,12 @@ func fireRoundAsync(ctx context.Context, runtimes []*nodeRuntime, roundID int64,
 	for _, runtime := range runtimes {
 		lineages[runtime.info.Name] = runtime.lineageSnapshot()
 		if !runtime.gate.TryStart() {
-			now := time.Now()
-			instant := model.Instant(now.Sub(origin).Nanoseconds())
-			results <- model.Attempt{RoundID: roundID, NodeID: runtime.info.Name, DispatchAt: instant, SettleAt: instant, Outcome: model.NoAttempt, Error: "previous attempt is still in flight"}
+			results <- noAttempt(runtime, roundID, origin)
+
 			continue
 		}
 		attempts.Add(1)
-		go func(runtime *nodeRuntime) {
-			defer attempts.Done()
-			defer runtime.gate.Done()
-			<-release
-			attemptCtx, cancel := context.WithTimeout(ctx, timeout)
-			defer cancel()
-			runtime.mu.Lock()
-			conn := runtime.writeConn
-			runtime.mu.Unlock()
-			attempt := postgres.Writer{NodeID: runtime.info.Name, Exec: conn, Origin: origin, Now: time.Now}.Attempt(attemptCtx, roundID)
-			if attempt.Outcome == model.InDoubt && conn != nil {
-				runtime.mu.Lock()
-				if runtime.writeConn == conn {
-					runtime.writeConn = nil
-				}
-				runtime.mu.Unlock()
-				_ = conn.Close(context.Background())
-			}
-			results <- attempt
-		}(runtime)
+		go attemptWrite(ctx, runtime, roundID, origin, timeout, release, results, &attempts)
 	}
 	close(release)
 	coordinators.Add(1)

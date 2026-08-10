@@ -108,7 +108,7 @@ func TestEndpointSnapshotKeepsAuthorityEvidence(t *testing.T) {
 	endpoint := &corev1.Endpoints{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "cluster-rw", Namespace: "database", ResourceVersion: "42",
-			Annotations:   map[string]string{"leader": `{"leader":"cluster-1"}`, "history": "[]"},
+			Annotations: map[string]string{"leader": `{"leader":"cluster-1"}`, "history": "[]"},
 			ManagedFields: []metav1.ManagedFieldsEntry{
 				{Manager: "metadata-creator", Operation: metav1.ManagedFieldsOperationUpdate, FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:metadata":{}}`)}},
 				{Manager: "patroni", Operation: metav1.ManagedFieldsOperationUpdate, FieldsV1: &metav1.FieldsV1{Raw: []byte(`{"f:subsets":{}}`)}},
