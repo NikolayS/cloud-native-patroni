@@ -93,12 +93,26 @@ buckets:
     count: 1
 `
 
-const stalePromoteBaseline = `schema: cnpatroni-authority-baseline/v1
+const stalePromoteBaseline = `schema: cnpatroni-authority-baseline/v2
 generated_from: abc123
 generated_at: 2026-08-09 23:20:00 UTC
 total: 2
+allowed_total: 0
 totals_by_rule:
   proc.promote: 2
+inputs:
+  scope:
+    roots: [.]
+    exclude_paths: []
+    exclude_generated: true
+    include_tests: false
+  rules:
+    - id: proc.promote
+      severity: forbidden
+      matchers:
+        - call:example.com/hits/pg.(*Instance).PromoteAndWait
+  packages: 5
+  files: 6
 buckets:
   - rule: proc.promote
     symbol: example.com/hits/ctrl.Promote
@@ -108,36 +122,78 @@ buckets:
     count: 1
 `
 
-const grownPromoteBaseline = `schema: cnpatroni-authority-baseline/v1
+const grownPromoteBaseline = `schema: cnpatroni-authority-baseline/v2
 generated_from: abc123
 generated_at: 2026-08-09 23:20:00 UTC
 total: 2
+allowed_total: 0
 totals_by_rule:
   proc.promote: 2
+inputs:
+  scope:
+    roots: [.]
+    exclude_paths: []
+    exclude_generated: true
+    include_tests: false
+  rules:
+    - id: proc.promote
+      severity: forbidden
+      matchers:
+        - call:example.com/hits/pg.(*Instance).PromoteAndWait
+  packages: 5
+  files: 6
 buckets:
   - rule: proc.promote
     symbol: example.com/hits/ctrl.Promote
     count: 2
 `
 
-const renamedOldBaseline = `schema: cnpatroni-authority-baseline/v1
+const renamedOldBaseline = `schema: cnpatroni-authority-baseline/v2
 generated_from: abc123
 generated_at: 2026-08-09 23:20:00 UTC
 total: 1
+allowed_total: 0
 totals_by_rule:
   proc.promote: 1
+inputs:
+  scope:
+    roots: [.]
+    exclude_paths: []
+    exclude_generated: true
+    include_tests: false
+  rules:
+    - id: proc.promote
+      severity: forbidden
+      matchers:
+        - call:example.com/hits/pg.(*Instance).PromoteAndWait
+  packages: 5
+  files: 6
 buckets:
   - rule: proc.promote
     symbol: pkg.OldName
     count: 1
 `
 
-const renamedNewBaseline = `schema: cnpatroni-authority-baseline/v1
+const renamedNewBaseline = `schema: cnpatroni-authority-baseline/v2
 generated_from: abc123
 generated_at: 2026-08-09 23:20:00 UTC
 total: 1
+allowed_total: 0
 totals_by_rule:
   proc.promote: 1
+inputs:
+  scope:
+    roots: [.]
+    exclude_paths: []
+    exclude_generated: true
+    include_tests: false
+  rules:
+    - id: proc.promote
+      severity: forbidden
+      matchers:
+        - call:example.com/hits/pg.(*Instance).PromoteAndWait
+  packages: 5
+  files: 6
 buckets:
   - rule: proc.promote
     symbol: pkg.NewName
@@ -222,7 +278,8 @@ func TestCheckCommandTracksForbiddenCallState(t *testing.T) {
 
 func TestBaselineCompareCommandMapsGrowthOntoExitCodes(t *testing.T) {
 	refusal := "the authority baseline grew; a change that adds forbidden calls needs an explicit" +
-		" human decision, not a regenerated baseline\n"
+		" human decision, not a regenerated baseline. Input weakening has no in-band approval;" +
+		" narrow the audit only by changing the audit tool itself, and review the rules diff\n"
 	cases := []struct {
 		name           string
 		base           string
