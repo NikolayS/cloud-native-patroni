@@ -12,7 +12,7 @@ test.
 A fully green board is therefore not evidence that the operator works, that Patroni holds
 high-availability authority, or that any cluster behaves correctly. It is evidence only that the
 code compiles, the unit tests pass, the generated artefacts match their sources, the documentation
-builds, and the fork's boundary and authority gates are satisfied.
+builds, and the fork's boundary, authority, and code-hygiene gates are satisfied.
 
 The end-to-end suite would provision Kubernetes clusters and exercise a running operator and its
 managed clusters. That would provide behavioural evidence for the scenarios it covers. The suite
@@ -20,6 +20,43 @@ lives in `continuous-delivery.yml` and never runs for a pull request. Its reques
 through `issue_comment` and `workflow_dispatch`; the inherited workflow also declares a daily
 schedule. Every path needs cloud credentials this fork does not hold and an operator image this
 fork does not publish, so the suite does not run successfully here.
+
+## Code hygiene gate
+
+The `Check CloudNativePatroni code hygiene` job gives its three analyses distinct scopes.
+Duplication scans non-test Go files under `hack/cnpatroni/upstream/`,
+`hack/cnpatroni/audit/`, and `internal/cnpatroni/`, excluding `testdata/`, where repetition can make
+fixtures clearer. Dead-code analysis starts from the declared executable roots for each module:
+`./cmd/...` in the upstream-boundary tool, `.` in the audit tool, and the filtered test executable
+for `internal/cnpatroni/`. The orphan-package check examines packages containing scanned files and
+rejects a non-`main` package that nothing in its module imports unless that package has a test file
+of its own.
+
+Those roots intentionally make the dead-code guarantee narrower than the duplication scope. For
+`internal/cnpatroni`, a function reached only from a test counts as reachable, and a package with
+its own test is not an orphan. This is an M0 consequence of `internal/cnpatroni/guard` being
+production-dead by design — nothing in the repository calls it yet. The boundary must be revisited
+at M1, when its call sites land and a production executable root becomes viable.
+
+A coverage assertion keeps the declared scan set complete. It identifies fork-owned code from the
+`cnpatroni-boundary` git attribute generated from `hack/cnpatroni/upstream/boundary.yaml` and from
+Go modules other than the inherited root operator module and `tests/` end-to-end module. The
+`boundary-guard` job already enforces the generated attribute file's freshness on every pull
+request with `cnpatroni-upstream gitattributes --check`. Fork-owned Go code outside the scan set
+fails the hygiene gate by design. To cover a new tree, add its module, directory, and appropriate
+dead-code roots to the scan-unit table in `hack/cnpatroni/check-code-hygiene.sh`.
+
+The ownership manifest has two known gaps: it classifies `internal/cnpatroni/guard/**`, but not
+`internal/cnpatroni/**`, and it has no rule for `poc/`. The gate still covers the first tree because
+`internal/cnpatroni/` is a declared scan directory. A new module under `poc/` is fork-authored by
+construction and therefore fails closed until it becomes a declared scan unit. These gaps remain
+recorded for the manifest owner to resolve; this gate does not widen the manifest.
+
+The baseline is zero: the inaugural scan found no unreachable functions and no clone groups, so
+there is no baseline file or allowlist to maintain. When the gate fires, use the paths and line
+numbers in its output to remove unreachable code or extract the duplicated behaviour into one
+implementation. The legitimate escape is to make the code no longer duplicated, not to raise the
+threshold or add an exclusion.
 
 ## Active workflow disposition
 
@@ -30,8 +67,8 @@ Exactly eight workflow files remain active under `.github/workflows/`.
 | `continuous-integration.yml` | Runs on pull requests and is active and required. GoReleaser now uses `--snapshot` because the fork has no tags. Publication is gated by the `ENABLE_IMAGE_PUSH` repository variable. The gate is event-agnostic: while the variable is unset, it disables publication for pull requests, pushes to `main`, and the nightly schedule alike. The image build still builds the `distroless` and `ubi` targets for `linux/amd64` and `linux/arm64` on pull requests that change operator, test, shell-script, or Go code, per the `change-triage` gate; documentation-only pull requests skip `buildx` entirely. |
 | `codeql-analysis.yml` | Active and passing. It was briefly red for an unrelated reason: a deliberately malformed Go test fixture under `hack/cnpatroni/audit/testdata/` broke `make generate` during the CodeQL build step. Commit `20e49a0e` fixed the fixture, after which run `31346382287` concluded `success`. CodeQL usually takes six to nine minutes and is often the last pending check. |
 | `spellcheck.yml` | Active and passing. It provides the `Run spellcheck` and `Run woke` checks. Its spellcheck sources cover `docs/src/` Markdown and `config/olm-manifests/bases/*.yaml`, so `docs/cnpatroni/` is not spellchecked; woke covers the wider tree according to its own configuration. |
-| `cnpatroni-authority-audit.yml` | Fork-owned, active, and passing. It is one of the two CloudNativePatroni gates. |
-| `cnpatroni-upstream-sync.yml` | Fork-owned and contains two jobs. `boundary-guard` runs on every pull request and pushes to `main`, `cnpatroni/**`, and `spike/**`, and is passing; it is the second CloudNativePatroni gate. `divergence-report` runs only on the weekly schedule and `workflow_dispatch`, so its pull-request skip is correct. |
+| `cnpatroni-authority-audit.yml` | Fork-owned, active, and passing. Its authority and code-hygiene jobs run on every pull request and push to `main`. |
+| `cnpatroni-upstream-sync.yml` | Fork-owned and contains two jobs. `boundary-guard` runs on every pull request and pushes to `main`, `cnpatroni/**`, and `spike/**`, and is passing. `divergence-report` runs only on the weekly schedule and `workflow_dispatch`, so its pull-request skip is correct. |
 | `continuous-delivery.yml` | Never runs on pull requests. Requested runs use `issue_comment` or `workflow_dispatch`; the inherited file also has a daily schedule. It provisions clusters and structurally needs cloud credentials, a Kubernetes cluster, and a published operator image, none of which exist here. It remains unmodified and dormant for this fork. |
 | `registry-clean.yml` | Runs on a daily schedule and through `workflow_dispatch`. It prunes the `cloudnative-pg-testing` package and, only when the repository owner is `cloudnative-pg`, the `pgbouncer-testing`, `postgresql-testing`, and `postgis-testing` operand packages. With `ENABLE_IMAGE_PUSH` unset, this fork publishes nothing, so there is nothing to prune. It remains in place and dormant in effect. |
 | `refresh-licenses.yml` | Runs weekly and through `workflow_dispatch`. It does not run on pull requests and remains in place. |

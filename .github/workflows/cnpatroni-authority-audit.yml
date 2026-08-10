@@ -4,9 +4,13 @@
 # upstream merge from silently reintroducing PostgreSQL high-availability
 # authority into a repository whose whole premise is that Patroni holds it.
 #
-# The job is deliberately separate from continuous-integration.yml. That file is
-# upstream's and is edited often; keeping the fork's gate in a file upstream does
-# not have removes a recurring merge conflict (specification section 20.2).
+# The code-hygiene job belongs here because it is also a fork-owned static gate
+# over the small CloudNativePatroni surface. Keeping both jobs together avoids a
+# workflow whose only purpose would be one script invocation.
+#
+# The jobs are deliberately separate from continuous-integration.yml. That file
+# is upstream's and is edited often; keeping the fork's gates in a file that
+# upstream does not have removes recurring merge conflicts (specification section 20.2).
 name: CNPatroni authority audit
 
 on:
@@ -24,6 +28,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  code-hygiene:
+    name: Check CloudNativePatroni code hygiene
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Install Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Reject unreachable or duplicated code
+        run: ./hack/cnpatroni/check-code-hygiene.sh
+
   authority-audit:
     name: Run the authority audit
     runs-on: ubuntu-24.04
