@@ -267,7 +267,18 @@ Each step is independently testable, and none is authorised yet.
     file. Each of these is user-visible or in-database and needs its own
     migration note.
 11. Change the Go module path and all import paths — last, and only once the
-    upstream merge tooling can rewrite them deterministically.
+    upstream merge tooling can rewrite them deterministically. The four
+    fork-owned modules — `hack/cnpatroni/audit`, `hack/cnpatroni/upstream`,
+    `poc/oracle`, and `poc/chaos` — carry paths under
+    `github.com/cloudnative-pg/cloudnative-pg` even though every line in them
+    is CloudNativePatroni's own, and they move in this step together with the
+    main module. That is a decision rather than an oversight. Renaming the
+    inherited module today would touch every import in the inherited tree,
+    which is exactly the broad mechanical rename this policy defers; renaming
+    only the fork-owned four would leave a module naming one repository beside
+    modules naming another. None of the four is published or importable from
+    outside the repository, so following the main module costs nothing until
+    the main module moves.
 12. Update `docs/src/labels_annotations.md` in the same commit as step 1. The
     in-code rule in `pkg/utils/labels_annotations.go` requires that any label or
     annotation change updates that page.
