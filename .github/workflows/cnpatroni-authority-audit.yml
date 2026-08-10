@@ -74,12 +74,24 @@ jobs:
       # The second layer of the ratchet. The per-bucket check above catches an
       # author who added a forbidden call. This catches the author who
       # regenerated the baseline to make that check green, because the
-      # regenerated file is compared against the one on the merge base.
+      # regenerated file is compared against the one the branch had before.
+      #
+      # This is the layer worth protecting, and it only protects what it runs
+      # on: mark this job a required status check on main, otherwise the whole
+      # audit is advisory.
       - name: Verify the authority baseline did not grow
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
         run: |
-          set -euo pipefail
-          base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+          else
+            # A direct push to main bypasses the pull request, so there is no
+            # merge base. Compare against the commit this one replaced, which
+            # is the tip main carried before the push for a single commit and
+            # the first parent for a merge.
+            base="$(git rev-parse "HEAD^")"
+          fi
 
           # The pull request that introduces this audit has no merge-base
           # baseline to compare. Bootstrap only from the recorded fork base and
