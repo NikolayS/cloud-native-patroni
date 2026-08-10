@@ -175,8 +175,17 @@ go run ./cmd/cnpatroni-upstream validate --drift --strict # before accepting the
    `HEAD`, so the baseline cannot claim an integration that did not happen.
 
 With `--drift` it also reports files this fork has changed since the fork base
-without declaring them. That is the check that stops the boundary from eroding
-one pull request at a time.
+whose declaration does not account for the change. That is the check that stops
+the boundary from eroding one pull request at a time. Two things are reported:
+
+- `D1`, a changed path no rule classifies, or one that only the catch-all
+  classifies.
+- `D2`, a changed path whose rule declares an ownership class that promises no
+  change. Only `adapted`, `disabled`, `cnpatroni-owned`, and `deleted` while the
+  path is genuinely absent explain a diff. Matching a specific rule is not
+  itself an explanation: an `upstream-untouched` rule states that the file is
+  upstream's verbatim, so a fork edit to it is drift however precisely the rule
+  names the path.
 
 The check worth understanding is the vocabulary scan. The manifest lists the
 regular expressions that name PostgreSQL high-availability authority —

@@ -558,57 +558,125 @@ func validateBaseline(opts Options) []Finding {
 	return findings
 }
 
-// checkDrift reports paths this fork has changed since the fork base that no
-// rule classifies. It is the half of the gate that watches our own pull
-// requests rather than upstream's.
+// checkDrift reports paths this fork has changed since the fork base whose
+// declaration does not account for the change: paths no rule classifies (D1),
+// and paths whose declared ownership class promises no change at all (D2). It
+// is the half of the gate that watches our own pull requests rather than
+// upstream's.
+//
+// Matching a specific rule is not on its own an explanation. An
+// upstream-untouched rule states that the file is upstream's verbatim, so
+// suppressing the finding for it would let any fork edit be laundered past the
+// gate simply by naming the path.
 func checkDrift(m *Manifest, opts Options) ([]Finding, error) {
 	changes, err := opts.Repo.ChangedFiles(opts.Baseline.ForkBase.Commit, "HEAD")
 	if err != nil {
 		return nil, err
 	}
 
-	var undeclared []string
+	var findings []Finding
 	for _, change := range changes {
 		rule := m.Match(change.Path)
-		if rule == nil || rule.IsCatchAll() {
-			undeclared = append(undeclared, change.Path)
+		switch {
+		case rule == nil || rule.IsCatchAll():
+			findings = append(findings, Finding{
+				Code:    "D1",
+				Path:    change.Path,
+				Message: "changed in this fork but not declared in the boundary manifest",
+				// Undeclared rather than an error: the remedy is to declare the
+				// path, which is a manifest edit, not a code revert.
+				Severity: SeverityUndeclared,
+			})
+		case ownershipExplainsChange(rule, change.Path, opts.Repo.Root):
+		default:
+			findings = append(findings, Finding{
+				Code:     "D2",
+				RuleID:   rule.ID,
+				Path:     change.Path,
+				Message:  misdeclaredMessage(rule),
+				Severity: SeverityUndeclared,
+			})
 		}
 	}
-	sort.Strings(undeclared)
 
-	findings := make([]Finding, 0, len(undeclared))
-	for _, path := range undeclared {
-		findings = append(findings, Finding{
-			Code:    "D1",
-			Path:    path,
-			Message: "changed in this fork but not declared in the boundary manifest",
-			// Undeclared rather than an error: the remedy is to declare the
-			// path, which is a manifest edit, not a code revert.
-			Severity: SeverityUndeclared,
-		})
-	}
+	// D1 before D2, each group by path, so that one run reads the same way twice.
+	sort.SliceStable(findings, func(i, j int) bool {
+		if findings[i].Code != findings[j].Code {
+			return findings[i].Code < findings[j].Code
+		}
+
+		return findings[i].Path < findings[j].Path
+	})
 
 	return findings, nil
+}
+
+// ownershipExplainsChange reports whether the ownership class a rule declares
+// legitimately accounts for the path differing from the fork base.
+func ownershipExplainsChange(rule *Rule, path, root string) bool {
+	switch rule.Ownership {
+	case OwnershipAdapted, OwnershipDisabled, OwnershipCNPatroniOwned:
+		return true
+	case OwnershipDeleted:
+		// Only absence explains it. A deleted path still in the worktree is
+		// reported by V6 or V7 when it is declared literally, and by nothing at
+		// all when a glob declares it.
+		return !existsInWorktree(root, path)
+	case OwnershipUpstreamUntouched:
+		return false
+	default:
+		// An unknown class is already a V0 error. Fail closed here too.
+		return false
+	}
+}
+
+func misdeclaredMessage(rule *Rule) string {
+	switch rule.Ownership {
+	case OwnershipDeleted:
+		return "changed in this fork and declared deleted, but the path is still present in the worktree"
+	case OwnershipUpstreamUntouched:
+		return "changed in this fork but declared upstream-untouched, which promises the file is " +
+			"upstream's verbatim; restore the upstream content, or reclassify the path"
+	default:
+		return fmt.Sprintf("changed in this fork but declared %s, which does not account for a change",
+			rule.Ownership)
+	}
 }
 
 // RemediationFor renders the copy-pasteable remedy printed after drift
 // findings.
 func RemediationFor(manifestPath string, findings []Finding) string {
-	paths := make([]string, 0, len(findings))
+	var undeclared, misdeclared []string
 	for _, f := range findings {
-		if f.Code == "D1" {
-			paths = append(paths, "  "+f.Path)
+		switch f.Code {
+		case "D1":
+			undeclared = append(undeclared, "  "+f.Path)
+		case "D2":
+			misdeclared = append(misdeclared, fmt.Sprintf("  %s (rule %s)", f.Path, f.RuleID))
 		}
 	}
-	if len(paths) == 0 {
-		return ""
+
+	rerun := "then run\n  " + fmt.Sprintf(gitx.ToolInvocation, "validate --drift") + "\n"
+
+	var b strings.Builder
+	if len(undeclared) > 0 {
+		fmt.Fprintf(&b,
+			"%d file(s) changed in this fork are not declared in %s:\n\n%s\n\n"+
+				"Declare each one under an existing rule, or add a new rule above the catch-all, %s",
+			len(undeclared), manifestPath, strings.Join(undeclared, "\n"), rerun)
+	}
+	if len(misdeclared) > 0 {
+		if b.Len() > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b,
+			"%d file(s) changed in this fork are declared in %s under a rule that promises no change:\n\n%s\n\n"+
+				"Restore the upstream content, or reclassify each path as adapted, disabled,\n"+
+				"cnpatroni-owned or deleted, %s",
+			len(misdeclared), manifestPath, strings.Join(misdeclared, "\n"), rerun)
 	}
 
-	return fmt.Sprintf(
-		"%d file(s) changed in this fork are not declared in %s:\n\n%s\n\n"+
-			"Declare each one under an existing rule, or add a new rule above the catch-all, then run\n"+
-			"  go run ./hack/cnpatroni/upstream/cmd/cnpatroni-upstream validate --drift\n",
-		len(paths), manifestPath, strings.Join(paths, "\n"))
+	return b.String()
 }
 
 func existsInWorktree(root, path string) bool {

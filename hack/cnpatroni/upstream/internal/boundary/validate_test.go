@@ -565,6 +565,85 @@ func TestValidateReportsUndeclaredForkEdits(t *testing.T) {
 	}
 }
 
+// Declaring a fork-edited path under a specific upstream-untouched rule must
+// not launder it past the gate. The rule promises the file is upstream's, so a
+// change to it is drift however precisely the rule names it.
+func TestValidateReportsForkEditsDeclaredUpstreamUntouched(t *testing.T) {
+	vf := newValidateFixture(t)
+	body := manifestBody(true, `  - id: keep.specs
+    ownership: upstream-untouched
+    paths: ["pkg/specs/pods.go"]
+  - id: adapt.process-primitives
+    ownership: adapted
+    paths: ["pkg/management/postgres/instance.go"]
+  - id: disable.election
+    ownership: disabled
+    mechanism: unreferenced
+    paths: ["internal/controller/replicas.go"]
+  - id: absorb
+    ownership: upstream-untouched
+    paths: ["**"]
+`, "")
+
+	findings := vf.validate(t, body, boundary.Options{CheckDrift: true})
+	if !hasCode(findings, "D2") {
+		t.Fatalf("codes = %v, want D2 naming pkg/specs/pods.go", findingCodes(findings))
+	}
+	for _, f := range findings {
+		if f.Code != "D2" {
+			continue
+		}
+		if f.Path != "pkg/specs/pods.go" {
+			t.Errorf("D2 names %q, want pkg/specs/pods.go", f.Path)
+		}
+		if f.RuleID != "keep.specs" {
+			t.Errorf("D2 rule id = %q, want keep.specs", f.RuleID)
+		}
+		if f.Severity != boundary.SeverityUndeclared {
+			t.Errorf("D2 severity = %v, want undeclared", f.Severity)
+		}
+	}
+}
+
+// The remedy for a misdeclared path is not the remedy for an undeclared one, so
+// the printed text has to name both cases.
+func TestRemediationNamesMisdeclaredPaths(t *testing.T) {
+	remedy := boundary.RemediationFor("boundary.yaml", []boundary.Finding{
+		{Code: "D1", Path: "pkg/new.go"},
+		{Code: "D2", RuleID: "keep.specs", Path: "pkg/specs/pods.go"},
+	})
+	for _, want := range []string{"pkg/new.go", "pkg/specs/pods.go", "reclassify"} {
+		if !strings.Contains(remedy, want) {
+			t.Errorf("remedy %q does not mention %q", remedy, want)
+		}
+	}
+}
+
+// A deleted path is expected to differ from the fork base, but only while it is
+// genuinely gone. One that is still in the worktree is drift as well as V7.
+func TestValidateReportsChangedDeletedPathsThatStillExist(t *testing.T) {
+	vf := newValidateFixture(t)
+	body := manifestBody(true, `  - id: delete.specs
+    ownership: deleted
+    paths: ["pkg/specs/pods.go"]
+  - id: adapt.process-primitives
+    ownership: adapted
+    paths: ["pkg/management/postgres/instance.go"]
+  - id: disable.election
+    ownership: disabled
+    mechanism: unreferenced
+    paths: ["internal/controller/replicas.go"]
+  - id: absorb
+    ownership: upstream-untouched
+    paths: ["**"]
+`, "")
+
+	findings := vf.validate(t, body, boundary.Options{CheckDrift: true})
+	if !hasCode(findings, "D2") || !hasCode(findings, "V7") {
+		t.Fatalf("codes = %v, want both V7 and D2", findingCodes(findings))
+	}
+}
+
 func TestValidateSkipsDriftWhenNotRequested(t *testing.T) {
 	vf := newValidateFixture(t)
 	body := manifestBody(true, `  - id: adapt.process-primitives
