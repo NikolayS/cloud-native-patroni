@@ -27,39 +27,53 @@ fork does not publish, so the suite does not run successfully here.
 ## Code hygiene gate
 
 The `Check CloudNativePatroni code hygiene` job gives its three analyses distinct scopes.
-Duplication scans non-test Go files under `hack/cnpatroni/upstream/`,
-`hack/cnpatroni/audit/`, and `internal/cnpatroni/`, excluding `testdata/`, where repetition can make
-fixtures clearer. Dead-code analysis starts from the declared executable roots for each module:
-`./cmd/...` in the upstream-boundary tool, `.` in the audit tool, and the filtered test executable
-for `internal/cnpatroni/`. The orphan-package check examines packages containing scanned files and
-rejects a non-`main` package that nothing in its module imports unless that package has a test file
-of its own.
+Duplication scans non-test Go files in the declared scan directories: `hack/cnpatroni/upstream/`,
+`hack/cnpatroni/audit/`, `internal/cnpatroni/`, `poc/oracle/`, and `poc/chaos/`. It excludes
+`testdata/` and vendored code. Dead-code analysis does not use that directory union as its call
+graph. Its effective scope is the packages reachable from each declared executable root:
+`./cmd/...` in the upstream-boundary module, `.` in the audit module, the filtered test executable
+for `internal/cnpatroni/`, and `./cmd/...` in both PoC modules. The orphan-package check examines
+packages containing scanned non-test files and rejects a non-`main` package that nothing in its
+module imports. A package's own test file exempts it only when its scan unit is analysed with
+`-test`; `internal/cnpatroni` is the only such unit today.
 
-Those roots intentionally make the dead-code guarantee narrower than the duplication scope. For
-`internal/cnpatroni`, a function reached only from a test counts as reachable, and a package with
-its own test is not an orphan. This is an M0 consequence of `internal/cnpatroni/guard` being
-production-dead by design — nothing in the repository calls it yet. The boundary must be revisited
-at M1, when its call sites land and a production executable root becomes viable.
+The job rejects every unreachable function that `deadcode` reports from those roots; it does not
+claim that every function in every scan directory is independently rooted and checked. In
+particular, `internal/cnpatroni` is analysed with `-test`, so a function reached only from a test
+counts as reachable. This deliberate M0 compromise exists because `internal/cnpatroni/guard` is
+production-dead by design — nothing in the repository calls it yet. Revisit it at M1, when the
+production call sites land and a production executable root becomes viable.
 
-A coverage assertion keeps the declared scan set complete. It identifies fork-owned code from the
-`cnpatroni-boundary` git attribute generated from `hack/cnpatroni/upstream/boundary.yaml` and from
-Go modules other than the inherited root operator module and `tests/` end-to-end module. The
-`boundary-guard` job already enforces the generated attribute file's freshness on every pull
-request with `cnpatroni-upstream gitattributes --check`. Fork-owned Go code outside the scan set
-fails the hygiene gate by design. To cover a new tree, add its module, directory, and appropriate
-dead-code roots to the scan-unit table in `hack/cnpatroni/check-code-hygiene.sh`.
+A coverage cross-check runs before the analyses. It loads
+`hack/cnpatroni/upstream/boundary.yaml` with the boundary package's parser and matcher, selects Go
+files whose matching rule has `ownership: cnpatroni-owned`, and also treats a file as fork-owned
+when its nearest `go.mod` is neither the inherited operator module nor the `tests/` module. A file
+selected by either signal must have declared coverage through a scan directory or an explicit
+coverage exclusion. The check treats a manifest that classifies no Go file as `cnpatroni-owned` as
+a misconfiguration. In the other direction, every scanned non-test Go file must be classified as
+`cnpatroni-owned` by the boundary manifest, so a disagreement between the scan-unit table and the
+manifest also fails and names the files. Candidate ownership includes test files but excludes
+`testdata/` and vendored code. Cover a new tree by adding its module, directory, and appropriate
+dead-code roots to the scan-unit table in `hack/cnpatroni/check-code-hygiene.sh`. If code genuinely
+should not be scanned, it instead needs an explicit coverage exclusion there with a written
+reason; there are currently no exclusions.
 
-The ownership manifest has two known gaps: it classifies `internal/cnpatroni/guard/**`, but not
-`internal/cnpatroni/**`, and it has no rule for `poc/`. The gate still covers the first tree because
-`internal/cnpatroni/` is a declared scan directory. A new module under `poc/` is fork-authored by
-construction and therefore fails closed until it becomes a declared scan unit. These gaps remain
-recorded for the manifest owner to resolve; this gate does not widen the manifest.
+Declared coverage is not proof that every analysis reads every counted file. A nested Go module
+inside a declared scan directory is prefix-matched as covered, but `go list ./...` in the parent
+module does not descend into it, so dead-code and orphan-package analysis skip it. Duplication
+still scans it because file collection is `find`-based. The `poc/` scan directories already have
+this nested-module shape, so this is a live gap. The declared-coverage count also includes
+`_test.go` files; duplication excludes them, and dead-code reads tests only for the unit analysed
+with `-test`. A fork-authored tree inside the inherited root operator module, at a path no
+`cnpatroni-owned` rule enumerates, is matched by the manifest's trailing `**` catch-all and reads as
+upstream code, so neither ownership signal covers it. Closing it is the manifest owner's call —
+either a manifest rule naming the tree or a gate assertion that no tracked Go file may be
+classified by the literal `**` pattern. This gate does not widen the manifest.
 
-The baseline is zero: the inaugural scan found no unreachable functions and no clone groups, so
-there is no baseline file or allowlist to maintain. When the gate fires, use the paths and line
-numbers in its output to remove unreachable code or extract the duplicated behaviour into one
-implementation. The legitimate escape is to make the code no longer duplicated, not to raise the
-threshold or add an exclusion.
+There is no dead-code or duplication baseline file or allowlist. When the gate fires, use the paths
+and line numbers in its output to remove unreachable code or extract the duplicated behaviour into
+one implementation. The legitimate escape is to make the code no longer duplicated, not to raise
+the threshold or add an analysis exclusion.
 
 ## Active workflow disposition
 
