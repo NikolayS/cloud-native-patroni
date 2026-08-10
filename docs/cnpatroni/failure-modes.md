@@ -54,8 +54,12 @@ records that were never written. `wal_log_hints` can only be set at server
 start, and is ignored when data checksums are on. Neither is a
 CloudNativePatroni guarantee: the inherited configuration defaults
 `wal_log_hints` to `on` and leaves data checksums to an opt-in `initdb` option,
-and this fork has no bootstrap of its own. Under this architecture the bootstrap
-is Patroni's, and it does not exist yet.
+and the operator-generated bootstrap does not yet exist. Under this architecture
+the bootstrap is Patroni's; although the walking-skeleton configuration in
+`poc/manifests/cluster/20-config.yaml` satisfies both preconditions — its
+Patroni `bootstrap` passes `data-checksums` to `initdb` and sets
+`wal_log_hints: "on"` under `postgresql.parameters` in that same block — a
+hand-written prototype does not make them a CloudNativePatroni guarantee.
 
 ## 3. Concurrent timeline fork
 
@@ -281,6 +285,9 @@ the callosotomy patients studied by Sperry and Gazzaniga had surgically
 separated hemispheres acting as independent agents — two decision-makers, not
 two histories. Clustering stacks popularised a state-based convention: more
 than one subset believes it is active, or more than one node acts as primary.
+With no canonical definition, "you are using the word incorrectly" is not a
+settling argument in either direction. That is why this document fixes the
+sense locally.
 
 - [Reproducing split-brain on CloudNativePG](https://coroot.com/blog/reproducing-split-brain-on-cloudnativepg/)
 - [Patroni dynamic configuration](https://patroni.readthedocs.io/en/latest/dynamic_configuration.html)
