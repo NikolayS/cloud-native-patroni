@@ -70,6 +70,7 @@ rules:
     paths:
       - hack/cnpatroni/**
       - .github/workflows/cnpatroni-*.yml
+      - .github/workflows-upstream/README.md
       - docs/cnpatroni/**
     note: >-
       The upstream compatibility system, its scheduled job and the maintainer
@@ -249,6 +250,31 @@ rules:
       recon-01 section 6.11: the promote subcommand patches Status.TargetPrimary
       directly, bypassing the operator entirely.
 
+  - id: disable.upstream-workflows
+    ownership: disabled
+    mechanism: moved-aside
+    moved_to: .github/workflows-upstream/
+    paths:
+      - .github/workflows/backport.yml
+      - .github/workflows/chatops.yml
+      - .github/workflows/require-labels.yml
+      - .github/workflows/pr_verify_linked_issue.yml
+      - .github/workflows/release-tag.yml
+      - .github/workflows/release-pr.yml
+      - .github/workflows/release-publish.yml
+      - .github/workflows/sync-api.yml
+      - .github/workflows/sync-docs.yml
+      - .github/workflows/osps_security_assessment.yml
+      - .github/workflows/ossf_scorecard.yml
+      - .github/workflows/snyk.yml
+      - .github/workflows/k8s-versions-check.yml
+      - .github/workflows/latest-postgres-version-check.yml
+      - .github/workflows/close-inactive-issues.yml
+    note: >-
+      These inherited workflows are disabled by moving them out of GitHub
+      Actions' discovery directory. Keeping their original paths in this rule
+      lets the drift gate verify both sides of every move.
+
   # -------------------------------------------------------------------- adapted
   - id: adapt.instance-manager
     ownership: adapted
@@ -368,6 +394,8 @@ rules:
       - .goreleaser.yml
       - .spellcheck.yaml
       - .wordlist-en-custom.txt
+      - .wokeignore
+      - DEPENDENCIES.md
       - .github/workflows/continuous-integration.yml
       - .github/workflows/continuous-delivery.yml
       - .github/workflows/registry-clean.yml
@@ -404,32 +432,28 @@ rules:
       removed by the fork identity work. All three existed at the fork base.
 
   # --------------------------------------------------- upstream, but watched
-  - id: upstream.workflows-to-disable
+  - id: upstream.parked-workflows
     ownership: upstream-untouched
     paths:
-      - .github/workflows/backport.yml
-      - .github/workflows/chatops.yml
-      - .github/workflows/require-labels.yml
-      - .github/workflows/pr_verify_linked_issue.yml
-      - .github/workflows/release-tag.yml
-      - .github/workflows/release-pr.yml
-      - .github/workflows/release-publish.yml
-      - .github/workflows/sync-api.yml
-      - .github/workflows/sync-docs.yml
-      - .github/workflows/osps_security_assessment.yml
-      - .github/workflows/ossf_scorecard.yml
-      - .github/workflows/k8s-versions-check.yml
-      - .github/workflows/latest-postgres-version-check.yml
-      - .github/workflows/close-inactive-issues.yml
+      - .github/workflows-upstream/backport.yml
+      - .github/workflows-upstream/chatops.yml
+      - .github/workflows-upstream/require-labels.yml
+      - .github/workflows-upstream/pr_verify_linked_issue.yml
+      - .github/workflows-upstream/release-tag.yml
+      - .github/workflows-upstream/release-pr.yml
+      - .github/workflows-upstream/release-publish.yml
+      - .github/workflows-upstream/sync-api.yml
+      - .github/workflows-upstream/sync-docs.yml
+      - .github/workflows-upstream/osps_security_assessment.yml
+      - .github/workflows-upstream/ossf_scorecard.yml
+      - .github/workflows-upstream/snyk.yml
+      - .github/workflows-upstream/k8s-versions-check.yml
+      - .github/workflows-upstream/latest-postgres-version-check.yml
+      - .github/workflows-upstream/close-inactive-issues.yml
     note: >-
-      recon-03 section 3 lists these as upstream-specific automation that
-      CloudNativePatroni must stop running, by moving them to
-      .github/workflows-upstream/ rather than deleting them, so that later
-      upstream merges still land somewhere. That move has not happened yet:
-      they are declared here so that the drift gate notices when it does, and so
-      that the rule is changed to `disabled` with `mechanism: moved-aside` in
-      the same change. release-tag.yml is the active hazard, because M0 will
-      edit pkg/versions/versions.go.
+      Verbatim copies of the inherited workflows are parked here so later
+      upstream changes remain visible. Their live source paths are declared by
+      disable.upstream-workflows with mechanism moved-aside.
 
   - id: upstream.audit-false-positives
     ownership: upstream-untouched
