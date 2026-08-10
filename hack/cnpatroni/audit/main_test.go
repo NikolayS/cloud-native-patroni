@@ -276,6 +276,151 @@ func TestCheckCommandTracksForbiddenCallState(t *testing.T) {
 	}
 }
 
+// The authority-audit workflow runs `check --format=github` and frames the
+// output as pull-request feedback. A violation that prints as a plain line
+// annotates nothing, so the flag has to reach the renderer.
+func TestCheckCommandRendersGitHubAnnotations(t *testing.T) {
+	dir := t.TempDir()
+	rules := filepath.Join(dir, "rules.yaml")
+	classification := filepath.Join(dir, "classification.yaml")
+	baseline := filepath.Join(dir, "baseline.yaml")
+	writeFile(t, rules, promoteOnlyRules)
+	writeFile(t, classification, minimalEntry)
+	writeFile(t, baseline, emptyAuthorityBaseline)
+
+	args := []string{
+		"check",
+		"--root", filepath.Join("testdata", "mod-hits"),
+		"--rules", rules,
+		"--classification", classification,
+		"--baseline", baseline,
+		"--format", "github",
+	}
+	code, stdout, _ := captureRun(t, args)
+	if code != exitViolation {
+		t.Fatalf("exit code = %d, want %d", code, exitViolation)
+	}
+
+	var annotation string
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.HasPrefix(line, "::error ") {
+			annotation = line
+
+			break
+		}
+	}
+	if annotation == "" {
+		t.Fatalf("check --format=github emitted no workflow command: %q", stdout)
+	}
+	for _, want := range []string{
+		"file=ctrl/ctrl.go", "line=", "col=",
+		"new forbidden call: proc.promote in example.com/hits/ctrl.Promote",
+	} {
+		if !strings.Contains(annotation, want) {
+			t.Errorf("annotation %q does not contain %q", annotation, want)
+		}
+	}
+	// A workflow command is one line, so the multi-line message of an
+	// unclassified hit has to be escaped rather than truncated at its first
+	// line. Dropping the classification makes the same hit unclassified.
+	writeFile(t, classification, `schema: cnpatroni-authority-classification/v1
+defaults:
+  owner: NikolayS
+entries: []
+`)
+	code, stdout, _ = captureRun(t, args)
+	if code != exitViolation {
+		t.Fatalf("exit code = %d, want %d", code, exitViolation)
+	}
+	unclassified := ""
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "unclassified authority hit") {
+			unclassified = line
+
+			break
+		}
+	}
+	if unclassified == "" {
+		t.Fatalf("no annotation for the unclassified hit: %q", stdout)
+	}
+	if !strings.HasPrefix(unclassified, "::error file=ctrl/ctrl.go,line=") {
+		t.Errorf("annotation %q does not place the unclassified hit", unclassified)
+	}
+	if !strings.Contains(unclassified, "%0A") {
+		t.Errorf("the multi-line message was not escaped onto one line: %q", unclassified)
+	}
+}
+
+func TestGitHubAnnotationPlacesWhatItCan(t *testing.T) {
+	cases := []struct {
+		name    string
+		level   string
+		message string
+		want    string
+	}{
+		{
+			name:    "line and column",
+			level:   "error",
+			message: "pkg/a.go:12:3: new forbidden call",
+			want:    "::error file=pkg/a.go,line=12,col=3::new forbidden call",
+		},
+		{
+			name:    "path only",
+			level:   "error",
+			message: "pkg/a.go: Symbol is classified guard: required",
+			want:    "::error file=pkg/a.go::Symbol is classified guard: required",
+		},
+		{
+			name:    "no location at all",
+			level:   "warning",
+			message: "baseline can be tightened: run `go run . baseline --write`",
+			want:    "::warning::baseline can be tightened: run `go run . baseline --write`",
+		},
+		{
+			name:    "percent and newline",
+			level:   "error",
+			message: "one 100% true\nsecond line\n",
+			want:    "::error::one 100%25 true%0Asecond line",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := githubAnnotation(tc.level, tc.message); got != tc.want {
+				t.Errorf("githubAnnotation = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// An unknown format is a tool error for scan. It must not be silently accepted
+// by check, which would report a gate that annotated nothing as compliance.
+func TestCheckCommandRejectsAnUnknownFormat(t *testing.T) {
+	dir := t.TempDir()
+	rules := filepath.Join(dir, "rules.yaml")
+	classification := filepath.Join(dir, "classification.yaml")
+	baseline := filepath.Join(dir, "baseline.yaml")
+	writeFile(t, rules, promoteOnlyRules)
+	writeFile(t, classification, minimalEntry)
+	writeFile(t, baseline, emptyAuthorityBaseline)
+
+	code, stdout, stderr := captureRun(t, []string{
+		"check",
+		"--root", filepath.Join("testdata", "mod-hits"),
+		"--rules", rules,
+		"--classification", classification,
+		"--baseline", baseline,
+		"--format", "nonsense",
+	})
+	if code != exitToolError {
+		t.Fatalf("exit code = %d, want %d\n%s%s", code, exitToolError, stdout, stderr)
+	}
+	if !strings.Contains(stderr, `unknown format "nonsense"`) ||
+		!strings.Contains(stderr, "not a policy failure") {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
 func TestBaselineCompareCommandMapsGrowthOntoExitCodes(t *testing.T) {
 	refusal := "the authority baseline grew; a change that adds forbidden calls needs an explicit" +
 		" human decision, not a regenerated baseline. Input weakening has no in-band approval;" +
