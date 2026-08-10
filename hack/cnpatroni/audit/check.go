@@ -39,23 +39,109 @@ type Report struct {
 // milestoneOrder gives the "until" field on an allow entry a meaning.
 var milestoneOrder = map[string]int{"M0": 0, "M1": 1, "M2": 2, "M3": 3, "M4": 4}
 
-// Check is the gate. It answers four questions:
+// Check is the gate. It answers five questions:
 //
-//  1. is every authority hit classified, or explicitly allowed;
-//  2. has the forbidden-call baseline grown;
-//  3. is every classification marked "guard: required" actually wired;
-//  4. does every classification and responsibility still describe real code.
-func Check(res *ScanResult, cls *Classification, baseline *Baseline, milestone string) Report {
+//  1. was the baseline measured under this rule set and scope;
+//  2. is every authority hit classified, or explicitly allowed;
+//  3. has the forbidden-call baseline grown;
+//  4. is every classification marked "guard: required" actually wired;
+//  5. does every classification and responsibility still describe real code.
+func Check(rules *RuleSet, res *ScanResult, cls *Classification, baseline *Baseline, milestone string) Report {
 	var report Report
 
+	report.checkBaselineCoherence(rules, res, baseline)
 	entries := cls.bySymbol()
 	report.checkClassificationCoverage(res, cls, entries)
 	report.checkBaseline(FilterAllowed(res.Findings, cls), baseline)
 	report.checkGuardWiring(res, cls)
-	report.checkStaleness(res, cls, entries)
+	report.checkStaleness(rules, res, cls, entries, baseline)
 	report.checkAllowExpiry(cls, milestone)
 
 	return report
+}
+
+func (r *Report) checkBaselineCoherence(rules *RuleSet, res *ScanResult, baseline *Baseline) {
+	live := Fingerprint(rules, res)
+	differences := inputDifferences(baseline.Inputs, live)
+	if len(differences) == 0 {
+		return
+	}
+
+	const maxDifferences = 5
+	shown := differences[:min(len(differences), maxDifferences)]
+	detail := strings.Join(shown, "; ")
+	if len(differences) > len(shown) {
+		detail += fmt.Sprintf("; and %d more differences", len(differences)-len(shown))
+	}
+	r.Violations = append(r.Violations,
+		"the recorded baseline was generated under a different rule set or scope than the one in this tree; "+
+			"differences: "+detail+"; regenerate it with `go run . baseline --write` and expect the change to be reviewed")
+}
+
+// inputDifferences deliberately ignores package and file counts. They describe
+// the measurement for a reviewer, but inherited code deletion legitimately and
+// frequently lowers them.
+func inputDifferences(recorded, live Inputs) []string {
+	var differences []string
+
+	recordedRoots := stringSet(recorded.Scope.Roots)
+	liveRoots := stringSet(live.Scope.Roots)
+	for _, root := range sortedSetDifference(recordedRoots, liveRoots) {
+		differences = append(differences, fmt.Sprintf("scan root %s is recorded in the baseline but absent from the live scope", root))
+	}
+	for _, root := range sortedSetDifference(liveRoots, recordedRoots) {
+		differences = append(differences, fmt.Sprintf("scan root %s is present in the live scope but absent from the recorded baseline", root))
+	}
+	recordedExcludes := stringSet(recorded.Scope.ExcludePaths)
+	liveExcludes := stringSet(live.Scope.ExcludePaths)
+	for _, exclude := range sortedSetDifference(recordedExcludes, liveExcludes) {
+		differences = append(differences, fmt.Sprintf("exclude path %s is recorded in the baseline but absent from the live scope", exclude))
+	}
+	for _, exclude := range sortedSetDifference(liveExcludes, recordedExcludes) {
+		differences = append(differences, fmt.Sprintf("exclude path %s is present in the live scope but absent from the recorded baseline", exclude))
+	}
+	if recorded.Scope.ExcludeGenerated != live.Scope.ExcludeGenerated {
+		differences = append(differences, fmt.Sprintf("exclude_generated is recorded as %t but live is %t",
+			recorded.Scope.ExcludeGenerated, live.Scope.ExcludeGenerated))
+	}
+	if recorded.Scope.IncludeTests != live.Scope.IncludeTests {
+		differences = append(differences, fmt.Sprintf("include_tests is recorded as %t but live is %t",
+			recorded.Scope.IncludeTests, live.Scope.IncludeTests))
+	}
+
+	recordedRules := indexRuleFingerprints(recorded.Rules)
+	liveRules := indexRuleFingerprints(live.Rules)
+	for _, id := range sortedKeys(recordedRules) {
+		recordedRule := recordedRules[id]
+		liveRule, present := liveRules[id]
+		if !present {
+			differences = append(differences,
+				fmt.Sprintf("rule %s is recorded in the baseline but absent from the live rule set", id))
+			continue
+		}
+		if recordedRule.Severity != liveRule.Severity {
+			differences = append(differences, fmt.Sprintf("rule %s severity is recorded as %s but live is %s",
+				id, recordedRule.Severity, liveRule.Severity))
+		}
+		recordedMatchers := stringSet(recordedRule.Matchers)
+		liveMatchers := stringSet(liveRule.Matchers)
+		for _, matcher := range sortedSetDifference(recordedMatchers, liveMatchers) {
+			differences = append(differences,
+				fmt.Sprintf("rule %s matcher %s is recorded in the baseline but absent from the live rule set", id, matcher))
+		}
+		for _, matcher := range sortedSetDifference(liveMatchers, recordedMatchers) {
+			differences = append(differences,
+				fmt.Sprintf("rule %s matcher %s is present in the live rule set but absent from the recorded baseline", id, matcher))
+		}
+	}
+	for _, id := range sortedKeys(liveRules) {
+		if _, present := recordedRules[id]; !present {
+			differences = append(differences,
+				fmt.Sprintf("rule %s is present in the live rule set but absent from the recorded baseline", id))
+		}
+	}
+
+	return differences
 }
 
 func (r *Report) checkClassificationCoverage(res *ScanResult, cls *Classification, entries map[string]*Entry) {
@@ -194,7 +280,29 @@ func (r *Report) checkGuardWiring(res *ScanResult, cls *Classification) {
 	}
 }
 
-func (r *Report) checkStaleness(res *ScanResult, cls *Classification, entries map[string]*Entry) {
+func (r *Report) checkStaleness(rules *RuleSet, res *ScanResult, cls *Classification,
+	entries map[string]*Entry, baseline *Baseline,
+) {
+	liveRules := make(map[string]bool, len(rules.Rules))
+	for _, rule := range rules.Rules {
+		liveRules[rule.ID] = true
+	}
+	removedRuleBySymbol := map[string]string{}
+	for _, bucket := range baseline.Buckets {
+		if liveRules[bucket.Rule] {
+			continue
+		}
+		if previous := removedRuleBySymbol[bucket.Symbol]; previous == "" || bucket.Rule < previous {
+			removedRuleBySymbol[bucket.Symbol] = bucket.Rule
+		}
+	}
+	classifiableSymbols := map[string]bool{}
+	for _, finding := range res.Findings {
+		if finding.Severity != SeverityObserve {
+			classifiableSymbols[finding.Symbol] = true
+		}
+	}
+
 	symbols := make([]string, 0, len(entries))
 	for symbol := range entries {
 		symbols = append(symbols, symbol)
@@ -206,6 +314,13 @@ func (r *Report) checkStaleness(res *ScanResult, cls *Classification, entries ma
 			r.Hygiene = append(r.Hygiene, fmt.Sprintf(
 				"stale classification: %s no longer exists in the tree; confirm it was removed"+
 					" rather than renamed, then delete or update the entry", symbol))
+			continue
+		}
+		if removedRule := removedRuleBySymbol[symbol]; removedRule != "" && !classifiableSymbols[symbol] {
+			r.Hygiene = append(r.Hygiene, fmt.Sprintf(
+				"stale classification: %s has no remaining inventory or forbidden authority hit"+
+					" because recorded rule %s is absent from the live rule set; restore the rule"+
+					" and review the rules diff rather than deleting the entry", symbol, removedRule))
 		}
 	}
 

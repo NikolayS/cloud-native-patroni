@@ -45,20 +45,48 @@ rules:
       - .../pg.(*Instance).PromoteAndWait
 `
 
-const emptyAuthorityBaseline = `schema: cnpatroni-authority-baseline/v1
+const emptyAuthorityBaseline = `schema: cnpatroni-authority-baseline/v2
 generated_from: abc123
 generated_at: 2026-08-09 23:20:00 UTC
 total: 0
+allowed_total: 0
 totals_by_rule: {}
+inputs:
+  scope:
+    roots: [.]
+    exclude_paths: []
+    exclude_generated: true
+    include_tests: false
+  rules:
+    - id: proc.promote
+      severity: forbidden
+      matchers:
+        - call:example.com/hits/pg.(*Instance).PromoteAndWait
+  packages: 5
+  files: 6
 buckets: []
 `
 
-const recordedPromoteBaseline = `schema: cnpatroni-authority-baseline/v1
+const recordedPromoteBaseline = `schema: cnpatroni-authority-baseline/v2
 generated_from: abc123
 generated_at: 2026-08-09 23:20:00 UTC
 total: 1
+allowed_total: 0
 totals_by_rule:
   proc.promote: 1
+inputs:
+  scope:
+    roots: [.]
+    exclude_paths: []
+    exclude_generated: true
+    include_tests: false
+  rules:
+    - id: proc.promote
+      severity: forbidden
+      matchers:
+        - call:example.com/hits/pg.(*Instance).PromoteAndWait
+  packages: 5
+  files: 6
 buckets:
   - rule: proc.promote
     symbol: example.com/hits/ctrl.Promote

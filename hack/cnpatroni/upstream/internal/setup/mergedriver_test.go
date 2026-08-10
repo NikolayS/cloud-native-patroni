@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -146,6 +147,83 @@ func TestTheGuardStopsAMergeGitWouldHaveTakenSilently(t *testing.T) {
 		if !strings.Contains(instance, want) {
 			t.Errorf("the conflicted file lost %q:\n%s", want, instance)
 		}
+	}
+}
+
+func TestTheGuardHoldsWhenTheClonePathCarriesShellMetacharacters(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the shell-command injection fixture is not portable to Windows")
+	}
+
+	binary := buildTool(t)
+
+	const boundaryPath = "pkg/management/postgres/instance.go"
+	const untouchedPath = "docs/src/faq.md"
+
+	manifest, err := boundary.Parse([]byte(guardManifest))
+	if err != nil {
+		t.Fatalf("boundary.Parse: %v", err)
+	}
+
+	fork := gittest.NewNamed(t, "x;true;#")
+	fork.Write(boundaryPath, "package postgres\n\nfunc first() {}\nfunc second() {}\n")
+	fork.Write(untouchedPath, "# Frequently asked questions\n\nOne.\n")
+	fork.Write(".gitattributes", boundary.GitAttributes(manifest))
+	fork.Commit("fork base")
+	fork.Branch("upstream-change")
+
+	// Upstream appends at the bottom of both files.
+	fork.Checkout("upstream-change")
+	fork.Write(boundaryPath, "package postgres\n\nfunc first() {}\nfunc second() {}\nfunc upstreamAddition() {}\n")
+	fork.Write(untouchedPath, "# Frequently asked questions\n\nOne.\n\nTwo.\n")
+	fork.Commit("upstream: add a code path")
+
+	// CloudNativePatroni adapts the top of both files.
+	fork.Checkout("main")
+	fork.Write(boundaryPath, "package postgres\n\nfunc adapted() {}\nfunc second() {}\n")
+	fork.Write(untouchedPath, "# Questions\n\nOne.\n")
+	fork.Commit("adapt the boundary file")
+
+	// Control: without the guard git merges both files cleanly and says nothing.
+	conflicts, err := fork.Repo(t).MergeTreeConflicts("main", "upstream-change")
+	if err != nil {
+		t.Fatalf("MergeTreeConflicts: %v", err)
+	}
+	if len(conflicts) != 0 {
+		t.Fatalf("the fixture does not reproduce a silent automerge: git predicts conflicts in %v", conflicts)
+	}
+
+	upstream := newUpstream(t)
+	opts := options(fork.Repo(t), "file://"+upstream.Root)
+	opts.DriverBinary = binary
+	if _, err := setup.Run(opts); err != nil {
+		t.Fatalf("setup.Run: %v", err)
+	}
+
+	out, code, _ := fork.Repo(t).RunAllowFail("merge", "--no-ff", "--no-edit", "upstream-change")
+	if code == 0 {
+		t.Fatalf("the merge succeeded; the boundary guard did not fire\n%s", out)
+	}
+
+	unmerged, err := fork.Repo(t).Run("diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		t.Fatalf("listing the unmerged paths: %v", err)
+	}
+	got := strings.Fields(unmerged)
+	if len(got) != 1 || got[0] != boundaryPath {
+		t.Fatalf("unmerged paths = %v, want only %q", got, boundaryPath)
+	}
+
+	instance := readWorktree(t, fork.Root, boundaryPath)
+	for _, want := range []string{"func adapted() {}", "func upstreamAddition() {}"} {
+		if !strings.Contains(instance, want) {
+			t.Errorf("the conflicted file lost %q:\n%s", want, instance)
+		}
+	}
+
+	faq := readWorktree(t, fork.Root, untouchedPath)
+	if !strings.Contains(faq, "# Questions") || !strings.Contains(faq, "Two.") {
+		t.Errorf("the undeclared file was not merged normally:\n%s", faq)
 	}
 }
 

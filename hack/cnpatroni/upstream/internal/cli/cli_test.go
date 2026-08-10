@@ -219,6 +219,24 @@ func TestCLIReportWritesBothArtifacts(t *testing.T) {
 	}
 }
 
+func TestCLIReportRefusesAMalformedManifest(t *testing.T) {
+	e := newEnv(t, cliManifest)
+	broken := filepath.Join(t.TempDir(), "broken.yaml")
+	body := strings.Replace(cliManifest, `include: ["**/*.go"]`, `include: ["**/*.go["]`, 1)
+	if err := os.WriteFile(broken, []byte(body), 0o600); err != nil {
+		t.Fatalf("writing malformed manifest: %v", err)
+	}
+	outDir := filepath.Join(t.TempDir(), "out")
+
+	code, _, _ := e.run("--manifest", broken, "report", "--to", "upstream", "--out-dir", outDir)
+	if code != cli.ExitManifestInvalid {
+		t.Fatalf("exit code = %d, want %d", code, cli.ExitManifestInvalid)
+	}
+	if _, err := os.Stat(filepath.Join(outDir, "report.json")); !os.IsNotExist(err) {
+		t.Fatalf("report.json was written for a malformed manifest: %v", err)
+	}
+}
+
 // A clone without the upstream remote must say what to run, not fail obscurely.
 func TestCLIReportReportsAMissingUpstreamRemote(t *testing.T) {
 	e := newEnv(t, cliManifest)
