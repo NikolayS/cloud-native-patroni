@@ -27,9 +27,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/cli"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gittest"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/cli"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gittest"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gitx"
 )
 
 const cliManifest = `schema: cnpatroni.io/boundary/v1

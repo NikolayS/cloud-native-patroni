@@ -22,7 +22,7 @@ SPDX-License-Identifier: Apache-2.0
 package report
 
 import (
-	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/boundary"
 )
 
 // Schema is the identifier of the machine-readable report format.

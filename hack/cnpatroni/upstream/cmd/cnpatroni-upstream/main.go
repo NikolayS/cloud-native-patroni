@@ -26,7 +26,7 @@ package main
 import (
 	"os"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/cli"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/cli"
 )
 
 func main() {

@@ -26,7 +26,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/boundary"
 )
 
 func ratchetManifest(rules ...boundary.Rule) *boundary.Manifest {

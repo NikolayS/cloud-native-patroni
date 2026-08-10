@@ -27,9 +27,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gittest"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/setup"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/boundary"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gittest"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/setup"
 )
 
 // guardManifest declares one boundary file, so that the generated attributes

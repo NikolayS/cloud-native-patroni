@@ -29,7 +29,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/cli"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/cli"
 	"go.yaml.in/yaml/v3"
 )
 

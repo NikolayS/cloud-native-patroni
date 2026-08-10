@@ -37,8 +37,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/postgres-ai/cnpatroni-upstream/internal/boundary"
-	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/boundary"
+	"github.com/cloudnative-pg/cloudnative-pg/hack/cnpatroni/upstream/internal/gitx"
 )
 
 // driverBinaryName is the file the merge driver is installed as, inside the
