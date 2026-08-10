@@ -395,6 +395,7 @@ rules:
       - .spellcheck.yaml
       - .wordlist-en-custom.txt
       - .wokeignore
+      - .gitignore
       - DEPENDENCIES.md
       - .github/workflows/continuous-integration.yml
       - .github/workflows/continuous-delivery.yml
@@ -404,7 +405,9 @@ rules:
     note: >-
       Owner directive D-1 requires the independence disclaimer in the README.
       recon-03 section 0 records that the version pipeline is already broken in
-      this fork because `git describe` finds no tags.
+      this fork because `git describe` finds no tags. `.gitignore` gains the
+      binary paths the hack/cnpatroni modules build beside their sources, which
+      no inherited rule covers because upstream builds into /bin/.
 
   - id: adapt.project-governance
     ownership: adapted
