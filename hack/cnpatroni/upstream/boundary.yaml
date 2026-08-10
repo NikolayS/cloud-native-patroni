@@ -76,6 +76,23 @@ rules:
       documentation. Upstream has no counterpart, so an upstream path arriving
       here is a name collision, not a merge.
 
+  - id: owned.project-metadata
+    ownership: cnpatroni-owned
+    paths:
+      - CLAUDE.md
+      - NOTICE
+    note: >-
+      Binding contributor instructions and the fork's derivation notice. Neither
+      path existed at the recorded CloudNativePG fork base.
+
+  - id: owned.runtime-guard
+    ownership: cnpatroni-owned
+    paths:
+      - internal/cnpatroni/guard/**
+    note: >-
+      The fail-closed runtime guard for CloudNativePG lifecycle operations that
+      Patroni owns. CloudNativePatroni introduced this package after the fork.
+
   - id: owned.decision-records
     ownership: cnpatroni-owned
     state: planned
@@ -360,6 +377,31 @@ rules:
       Owner directive D-1 requires the independence disclaimer in the README.
       recon-03 section 0 records that the version pipeline is already broken in
       this fork because `git describe` finds no tags.
+
+  - id: adapt.project-governance
+    ownership: adapted
+    paths:
+      - CODE_OF_CONDUCT.md
+      - CONTRIBUTING.md
+      - GOVERNANCE.md
+      - MAINTAINERS.md
+      - ROADMAP.md
+      - SECURITY.md
+      - SUPPORT.md
+    note: >-
+      Upstream project-governance and support documents adapted in place for the
+      independent CloudNativePatroni fork.
+
+  # ------------------------------------------------------------------- deleted
+  - id: delete.upstream-project-metadata
+    ownership: deleted
+    paths:
+      - ADOPTERS.md
+      - CODEOWNERS
+      - SECURITY-INSIGHTS.yml
+    note: >-
+      Upstream project-specific adoption, ownership and security-insights files
+      removed by the fork identity work. All three existed at the fork base.
 
   # --------------------------------------------------- upstream, but watched
   - id: upstream.workflows-to-disable
