@@ -364,9 +364,19 @@ func runReport(args []string, g globals, stdout, stderr io.Writer) int {
 		return ExitUsage
 	}
 
-	m, err := boundary.Load(g.manifestFile(repo))
+	manifestPath := g.manifestFile(repo)
+	m, err := boundary.Load(manifestPath)
 	if err != nil {
 		return classify(err, stderr)
+	}
+	findings, err := boundary.Validate(m, boundary.Options{})
+	if err != nil {
+		return classify(err, stderr)
+	}
+	if boundary.ExitCode(findings) == ExitManifestInvalid {
+		printFindings(stderr, manifestPath, findings)
+
+		return ExitManifestInvalid
 	}
 	b, err := baseline.Load(g.baselineFile(repo))
 	if err != nil {

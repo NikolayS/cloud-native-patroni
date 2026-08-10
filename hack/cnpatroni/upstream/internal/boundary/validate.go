@@ -178,6 +178,33 @@ func validateStructure(m *Manifest) []Finding {
 		})
 	}
 
+	patternLists := []struct {
+		name string
+		err  []patternError
+	}{
+		{"audit_scan.include", m.auditIncludeErrors},
+		{"audit_scan.exclude", m.auditExcludeErrors},
+		{"generated_artifacts", m.generatedArtifactErrors},
+	}
+	for _, list := range patternLists {
+		for _, patternErr := range list.err {
+			findings = append(findings, Finding{
+				Code:     "V4",
+				Path:     patternErr.pattern,
+				Message:  fmt.Sprintf("%s: %v", list.name, patternErr.err),
+				Severity: SeverityError,
+			})
+		}
+	}
+
+	if len(m.AuditTerms) == 0 {
+		findings = append(findings, Finding{
+			Code:     "V14",
+			Message:  "audit_terms is empty, so the V9 high-availability vocabulary check reports nothing",
+			Severity: SeverityError,
+		})
+	}
+
 	if len(m.Rules) == 0 {
 		return append(findings, Finding{
 			Code:     "V2",
@@ -463,7 +490,7 @@ func auditTermScan(m *Manifest, opts Options) ([]Finding, error) {
 
 	findings := make([]Finding, 0, len(matches))
 	for _, path := range matches {
-		if !inAuditScan(m, path) {
+		if !m.InAuditScan(path) {
 			continue
 		}
 		rule := m.Match(path)
@@ -489,27 +516,6 @@ func auditTermScan(m *Manifest, opts Options) ([]Finding, error) {
 	}
 
 	return findings, nil
-}
-
-func inAuditScan(m *Manifest, path string) bool {
-	included := len(m.AuditScan.Include) == 0
-	for _, pattern := range m.AuditScan.Include {
-		if g, err := CompileGlob(pattern); err == nil && g.Match(path) {
-			included = true
-
-			break
-		}
-	}
-	if !included {
-		return false
-	}
-	for _, pattern := range m.AuditScan.Exclude {
-		if g, err := CompileGlob(pattern); err == nil && g.Match(path) {
-			return false
-		}
-	}
-
-	return true
 }
 
 // validateBaseline asserts that the recorded baseline cannot lie: both the fork
