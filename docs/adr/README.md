@@ -83,8 +83,8 @@ written here therefore start at 0003.
 
 | # | Title | Status |
 |---|---|---|
-| 0001 | Patroni scope value and the read-write Service pairing | Reserved, not written |
-| 0002 | What runs in the database container | Reserved, not written |
+| [0001](0001-patroni-scope-pairs-with-write-service.md) | Patroni scope pairs with the write Service, and Patroni owns its Endpoints | Accepted |
+| [0002](0002-patroni-is-pid-1.md) | Patroni is PID 1 in the database container | Accepted |
 | [0003](0003-patroni-is-the-single-ha-authority.md) | Patroni is the single high-availability authority | Accepted |
 | [0004](0004-cnpatroni-identifiers-rename-deferred.md) | New identifiers use `cnpatroni`, and the broad rename is deferred | Accepted |
 | [0005](0005-fork-base-deviates-from-the-tag.md) | The fork base is upstream `main` at `b226821`, not the `v1.30.0` tag | Open |
