@@ -77,6 +77,11 @@ jobs:
           cd "${TOOL_DIR}"
           go vet ./...
           go test ./...
+      # These two steps consume pass or fail only, never the tool's exit code, so
+      # `go run` is safe here: it collapses every non-zero status to 1, which
+      # still fails the step under errexit. A step that reads the exit code must
+      # build the binary first, the way divergence-report does. Do not copy this
+      # invocation into a step that publishes the code.
       -
         name: Validate the manifest and check for undeclared changes
         run: |
@@ -108,23 +113,33 @@ jobs:
         with:
           go-version-file: hack/cnpatroni/upstream/go.mod
           check-latest: true
+      # `go run` runs the program as a child process, prints "exit status N" on
+      # stderr and then exits 1 itself, so the tool's exit-code lattice never
+      # reaches the shell. The report step below publishes that code, so the
+      # binary is built once here and every step in this job invokes it.
       -
-        name: Configure the upstream remote
+        name: Build the upstream tool
         run: |
           cd "${TOOL_DIR}"
-          go run ./cmd/cnpatroni-upstream --repo "${GITHUB_WORKSPACE}" setup
+          go build -o "${RUNNER_TEMP}/cnpatroni-upstream" ./cmd/cnpatroni-upstream
+      -
+        # The tool resolves the manifest, the baseline and every git call from
+        # --repo, so it does not need to run from the module directory.
+        name: Configure the upstream remote
+        run: |
+          "${RUNNER_TEMP}/cnpatroni-upstream" --repo "${GITHUB_WORKSPACE}" setup
       -
         name: Compute the report
         id: report
         env:
           TO_REF: ${{ inputs.to_ref || 'upstream/main' }}
         run: |
-          cd "${TOOL_DIR}"
           set +e
-          go run ./cmd/cnpatroni-upstream --repo "${GITHUB_WORKSPACE}" \
+          "${RUNNER_TEMP}/cnpatroni-upstream" --repo "${GITHUB_WORKSPACE}" \
             report --to "${TO_REF}" --stdout > "${RUNNER_TEMP}/report.md"
-          echo "exit_code=$?" >> "${GITHUB_OUTPUT}"
+          code=$?
           set -e
+          echo "exit_code=${code}" >> "${GITHUB_OUTPUT}"
           cat "${RUNNER_TEMP}/report.md" >> "${GITHUB_STEP_SUMMARY}"
       -
         name: Upload the report
@@ -164,10 +179,15 @@ jobs:
           fi
       -
         name: Fail the run when upstream changed a boundary path
-        # Exit code 3 or higher means the manifest itself is out of date, which
-        # is worth failing over; 1 and 2 are ordinary review work.
-        if: steps.report.outputs.exit_code == '3' || steps.report.outputs.exit_code == '4'
+        # Exit code 3 or higher means the manifest itself is out of date (3, 4)
+        # or the tool could not answer the question at all (5, 6); both are worth
+        # failing over. 1 and 2 are ordinary review work. The comparison is
+        # numeric and open-ended so a code this workflow has never seen fails
+        # closed instead of passing unnoticed, and fromJSON raises on a missing
+        # output rather than casting it to 0.
+        if: fromJSON(steps.report.outputs.exit_code) >= 3
         run: |
-          echo "The boundary manifest does not classify something upstream changed." >&2
+          echo "The boundary manifest does not classify something upstream changed," >&2
+          echo "or the tool could not produce a report." >&2
           echo "See the tracking issue and the step summary." >&2
           exit 1
