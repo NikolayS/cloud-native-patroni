@@ -443,8 +443,8 @@ func writeReport(dir string, r *report.Report) error {
 
 // regenerateHint is printed whenever the checked-in attributes and the manifest
 // disagree, because a stale file guards a boundary that has moved.
-const regenerateHint = "Regenerate it with:\n" +
-	"  (cd hack/cnpatroni/upstream && go run ./cmd/cnpatroni-upstream gitattributes)\n"
+var regenerateHint = "Regenerate it with:\n  " +
+	fmt.Sprintf(gitx.ToolInvocation, "gitattributes") + "\n"
 
 const mergeDriverUsage = `cnpatroni-upstream merge-driver %O %A %B %L %P
 

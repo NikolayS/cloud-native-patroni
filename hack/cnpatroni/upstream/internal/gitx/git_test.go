@@ -21,13 +21,93 @@ package gitx_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/postgres-ai/cnpatroni-upstream/internal/gittest"
 	"github.com/postgres-ai/cnpatroni-upstream/internal/gitx"
 )
+
+// A remedy is worth nothing if the command in it does not run. This tool is its
+// own Go module, so `go run ./hack/...` from the repository root fails with
+// "main module does not contain package"; the remedies have to carry the
+// invocation that works.
+func TestToolInvocationRuns(t *testing.T) {
+	shell, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skipf("no shell available: %v", err)
+	}
+
+	root := strings.TrimSpace(gittest.RunGit(t, "", "rev-parse", "--show-toplevel"))
+	command := fmt.Sprintf(gitx.ToolInvocation, "version")
+
+	cmd := exec.Command(shell, "-c", command) //nolint:gosec // the command under test is a constant
+	cmd.Dir = root
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("the remedy %q does not run from %s: %v\n%s", command, root, err, out)
+	}
+	if !strings.Contains(string(out), "cnpatroni-upstream") {
+		t.Errorf("the remedy %q printed %q, want the tool version", command, out)
+	}
+}
+
+// Every remedy has to route through the one constant, so that the next fix
+// happens once rather than three times.
+func TestEnvironmentRemediesUseTheToolInvocation(t *testing.T) {
+	f := gittest.New(t)
+	f.Write("a.go", "package a\n")
+	f.Commit("base")
+
+	remedies := []string{
+		remedyFor(t, f.Repo(t).RequireRemote("upstream")),
+		remedyFor(t, shallowCloneError(t)),
+	}
+	want := fmt.Sprintf(gitx.ToolInvocation, "setup")
+	for _, remedy := range remedies {
+		if !strings.Contains(remedy, want) {
+			t.Errorf("remedy %q does not contain %q", remedy, want)
+		}
+		if strings.Contains(remedy, "go run ./hack/") {
+			t.Errorf("remedy %q tells the reader to run the tool from the repository root, which fails", remedy)
+		}
+	}
+}
+
+func remedyFor(t *testing.T, err error) string {
+	t.Helper()
+
+	var envErr *gitx.EnvironmentError
+	if !errors.As(err, &envErr) {
+		t.Fatalf("error %v is not an EnvironmentError", err)
+	}
+
+	return envErr.Remedy
+}
+
+func shallowCloneError(t *testing.T) error {
+	t.Helper()
+
+	origin := gittest.New(t)
+	origin.Write("a.go", "package a\n")
+	origin.Commit("one")
+	origin.Write("b.go", "package b\n")
+	origin.Commit("two")
+
+	shallowRoot := filepath.Join(t.TempDir(), "shallow")
+	gittest.RunGit(t, "", "clone", "--depth", "1", "--no-local", "file://"+origin.Root, shallowRoot)
+
+	repo, err := gitx.Open(shallowRoot)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	return repo.RequireCompleteHistory()
+}
 
 func TestOpenRejectsNonRepository(t *testing.T) {
 	dir := t.TempDir()

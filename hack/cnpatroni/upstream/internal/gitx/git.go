@@ -45,6 +45,15 @@ func (e *EnvironmentError) Error() string {
 	return e.Reason + "\n" + e.Remedy
 }
 
+// ToolInvocation is the shell command that runs the CloudNativePatroni upstream
+// tool from a repository checkout, with %s replaced by the subcommand and its
+// flags. Every remedy this tooling prints has to use it: the tool lives in its
+// own Go module, so `go run ./hack/cnpatroni/upstream/cmd/cnpatroni-upstream`
+// from the repository root fails with "main module does not contain package".
+// The invocation changes directory into the module first, in a subshell, so
+// that the caller's working directory survives.
+const ToolInvocation = "(cd hack/cnpatroni/upstream && go run ./cmd/cnpatroni-upstream %s)"
+
 // Repo is a git repository rooted at Root.
 type Repo struct {
 	Root string
@@ -177,8 +186,8 @@ func (r *Repo) RequireRemote(name string) error {
 
 	return &EnvironmentError{
 		Reason: fmt.Sprintf("this clone has no %q remote, so upstream CloudNativePG cannot be compared", name),
-		Remedy: "Run `go run ./hack/cnpatroni/upstream/cmd/cnpatroni-upstream setup` once in this clone, " +
-			"or `... setup --dry-run` to print the exact git commands first.",
+		Remedy: fmt.Sprintf("Run `%s` once in this clone, or `%s` to print the exact git commands first.",
+			fmt.Sprintf(ToolInvocation, "setup"), fmt.Sprintf(ToolInvocation, "setup --dry-run")),
 	}
 }
 
@@ -194,8 +203,8 @@ func (r *Repo) RequireCompleteHistory() error {
 
 	return &EnvironmentError{
 		Reason: "this clone is shallow, so the fork baseline and the upstream range cannot be resolved",
-		Remedy: "Run `go run ./hack/cnpatroni/upstream/cmd/cnpatroni-upstream setup` once in this clone, " +
-			"or in CI check out with `fetch-depth: 0`.",
+		Remedy: fmt.Sprintf("Run `%s` once in this clone, or in CI check out with `fetch-depth: 0`.",
+			fmt.Sprintf(ToolInvocation, "setup")),
 	}
 }
 
