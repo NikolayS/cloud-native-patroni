@@ -20,10 +20,13 @@ SPDX-License-Identifier: Apache-2.0
 package main
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -59,6 +62,57 @@ totals_by_rule:
 buckets:
   - rule: proc.promote
     symbol: example.com/hits/ctrl.Promote
+    count: 1
+`
+
+const stalePromoteBaseline = `schema: cnpatroni-authority-baseline/v1
+generated_from: abc123
+generated_at: 2026-08-09 23:20:00 UTC
+total: 2
+totals_by_rule:
+  proc.promote: 2
+buckets:
+  - rule: proc.promote
+    symbol: example.com/hits/ctrl.Promote
+    count: 1
+  - rule: proc.promote
+    symbol: pkg.Vanished
+    count: 1
+`
+
+const grownPromoteBaseline = `schema: cnpatroni-authority-baseline/v1
+generated_from: abc123
+generated_at: 2026-08-09 23:20:00 UTC
+total: 2
+totals_by_rule:
+  proc.promote: 2
+buckets:
+  - rule: proc.promote
+    symbol: example.com/hits/ctrl.Promote
+    count: 2
+`
+
+const renamedOldBaseline = `schema: cnpatroni-authority-baseline/v1
+generated_from: abc123
+generated_at: 2026-08-09 23:20:00 UTC
+total: 1
+totals_by_rule:
+  proc.promote: 1
+buckets:
+  - rule: proc.promote
+    symbol: pkg.OldName
+    count: 1
+`
+
+const renamedNewBaseline = `schema: cnpatroni-authority-baseline/v1
+generated_from: abc123
+generated_at: 2026-08-09 23:20:00 UTC
+total: 1
+totals_by_rule:
+  proc.promote: 1
+buckets:
+  - rule: proc.promote
+    symbol: pkg.NewName
     count: 1
 `
 
@@ -101,6 +155,32 @@ func TestCheckCommandTracksForbiddenCallState(t *testing.T) {
 		t.Errorf("clean summary = %q", stdout)
 	}
 
+	writeFile(t, baseline, stalePromoteBaseline)
+	code, stdout, stderr = captureRun(t, args)
+	if code != exitHygiene {
+		t.Fatalf("stale baseline exit code = %d, want %d", code, exitHygiene)
+	}
+	wantHygiene := "stale baseline entry: proc.promote in pkg.Vanished; " +
+		"run `go run . baseline --write`\n"
+	if stderr != wantHygiene {
+		t.Errorf("stale baseline stderr = %q, want %q", stderr, wantHygiene)
+	}
+	if stdout != "authority audit: 1 findings, 1 classified symbols, 0 violations, 1 hygiene notes\n" {
+		t.Errorf("stale baseline stdout = %q", stdout)
+	}
+
+	warnArgs := append(append([]string{}, args...), "--warn-only-hygiene")
+	code, stdout, stderr = captureRun(t, warnArgs)
+	if code != exitClean {
+		t.Fatalf("warn-only stale baseline exit code = %d, want %d", code, exitClean)
+	}
+	if stderr != wantHygiene {
+		t.Errorf("warn-only stale baseline stderr = %q, want %q", stderr, wantHygiene)
+	}
+	if stdout != "authority audit: 1 findings, 1 classified symbols, 0 violations, 1 hygiene notes\n" {
+		t.Errorf("warn-only stale baseline stdout = %q", stdout)
+	}
+
 	writeFile(t, baseline, "schema: [\n")
 	code, _, stderr = captureRun(t, args)
 	if code != exitToolError {
@@ -112,11 +192,162 @@ func TestCheckCommandTracksForbiddenCallState(t *testing.T) {
 	}
 }
 
+func TestBaselineCompareCommandMapsGrowthOntoExitCodes(t *testing.T) {
+	refusal := "the authority baseline grew; a change that adds forbidden calls needs an explicit" +
+		" human decision, not a regenerated baseline\n"
+	cases := []struct {
+		name           string
+		base           string
+		head           string
+		missingCompare bool
+		wantCode       int
+		wantStdout     string
+		wantStderr     string
+	}{
+		{
+			name:       "unchanged",
+			base:       recordedPromoteBaseline,
+			head:       recordedPromoteBaseline,
+			wantCode:   exitClean,
+			wantStdout: "authority baseline: 1 -> 1 (+0)\n",
+		},
+		{
+			name:     "total fell",
+			base:     stalePromoteBaseline,
+			head:     recordedPromoteBaseline,
+			wantCode: exitClean,
+			wantStdout: "authority baseline: 2 -> 1 (-1)\n" +
+				fmt.Sprintf("  %-28s %d -> %d (%+d)\n", "proc.promote", 2, 1, -1),
+		},
+		{
+			name:     "total grew",
+			base:     recordedPromoteBaseline,
+			head:     grownPromoteBaseline,
+			wantCode: exitViolation,
+			wantStdout: "authority baseline: 1 -> 2 (+1)\n" +
+				fmt.Sprintf("  %-28s %d -> %d (%+d)\n", "proc.promote", 1, 2, 1) +
+				"  new or enlarged bucket: proc.promote in example.com/hits/ctrl.Promote 1 -> 2\n",
+			wantStderr: refusal,
+		},
+		{
+			name:     "bucket renamed at a constant total",
+			base:     renamedOldBaseline,
+			head:     renamedNewBaseline,
+			wantCode: exitViolation,
+			wantStdout: "authority baseline: 1 -> 1 (+0)\n" +
+				"  new or enlarged bucket: proc.promote in pkg.NewName 0 -> 1\n",
+			wantStderr: refusal,
+		},
+		{
+			name:           "compare file missing",
+			head:           recordedPromoteBaseline,
+			missingCompare: true,
+			wantCode:       exitToolError,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			basePath := filepath.Join(dir, "base.yaml")
+			headPath := filepath.Join(dir, "head.yaml")
+			summaryPath := filepath.Join(dir, "summary.md")
+			if !tc.missingCompare {
+				writeFile(t, basePath, tc.base)
+			}
+			writeFile(t, headPath, tc.head)
+			writeFile(t, summaryPath, "")
+			t.Setenv("GITHUB_STEP_SUMMARY", summaryPath)
+
+			wantStderr := tc.wantStderr
+			if tc.missingCompare {
+				_, readErr := os.ReadFile(basePath)
+				wantStderr = fmt.Sprintf("audit: reading baseline: %v\n", readErr) +
+					"this is a tool or configuration error, not a policy failure\n"
+			}
+			code, stdout, stderr := captureRun(t, []string{
+				"baseline", "--baseline", headPath, "--compare", basePath,
+			})
+			if code != tc.wantCode {
+				t.Errorf("exit code = %d, want %d", code, tc.wantCode)
+			}
+			if stdout != tc.wantStdout {
+				t.Errorf("stdout = %q, want %q", stdout, tc.wantStdout)
+			}
+			if stderr != wantStderr {
+				t.Errorf("stderr = %q, want %q", stderr, wantStderr)
+			}
+
+			wantSummary := ""
+			if tc.wantStdout != "" {
+				wantSummary = strings.SplitN(tc.wantStdout, "\n", 2)[0] + "\n"
+			}
+			summary, err := os.ReadFile(summaryPath)
+			if err != nil {
+				t.Fatalf("read step summary: %v", err)
+			}
+			if string(summary) != wantSummary {
+				t.Errorf("step summary = %q, want %q", summary, wantSummary)
+			}
+		})
+	}
+}
+
 func TestHeadCommitReportsUnknownWhenGitIsAbsent(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
 	if got := headCommit(t.TempDir()); got != "unknown" {
 		t.Errorf("headCommit without git = %q, want unknown", got)
+	}
+}
+
+func TestScanCommandStreamsOutputLargerThanThePipeBuffer(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "go.mod"), "module example.com/big\n\ngo 1.26.5\n")
+	writeFile(t, filepath.Join(dir, "gen.go"),
+		"package big\n\nvar signals = []string{\n"+
+			strings.Repeat("\t\"standby.signal\",\n", 2000)+"}\n")
+	rules := filepath.Join(dir, "rules.yaml")
+	writeFile(t, rules, `schema: cnpatroni-authority-rules/v1
+module: example.com/big
+scope:
+  roots: [.]
+  exclude_generated: true
+  include_tests: false
+rules:
+  - id: recovery.standby-signal
+    severity: forbidden
+    spec: "7.4 bullet 3"
+    message: writing standby.signal belongs to Patroni
+    literals:
+      - standby.signal
+`)
+
+	code, stdout, stderr := captureRun(t, []string{
+		"scan", "--root", dir, "--rules", rules, "--format", "text",
+	})
+	if code != exitClean {
+		t.Errorf("exit code = %d, want %d", code, exitClean)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+	// This exceeds twice the 64 KiB maximum pipe buffer on macOS and Linux.
+	if len(stdout) <= 131072 {
+		t.Errorf("stdout length = %d, want more than 131072", len(stdout))
+	}
+	const trailer = "\n2000 findings in 1 packages, 1 files\n"
+	if !strings.HasSuffix(stdout, trailer) {
+		t.Errorf("stdout does not end with %q", trailer)
+	}
+	matchingLines := 0
+	for _, line := range strings.Split(stdout, "\n") {
+		if strings.Contains(line, "[recovery.standby-signal]") {
+			matchingLines++
+		}
+	}
+	if matchingLines != 2000 {
+		t.Errorf("matching output lines = %d, want 2000", matchingLines)
 	}
 }
 
@@ -131,32 +362,44 @@ func captureRun(t *testing.T, args []string) (code int, stdout, stderr string) {
 	if err != nil {
 		t.Fatalf("stderr pipe: %v", err)
 	}
+	var stdoutBody, stderrBody bytes.Buffer
+	var stdoutReadErr, stderrReadErr error
+	var readers sync.WaitGroup
+	readers.Add(2)
+	go func() {
+		defer readers.Done()
+		_, stdoutReadErr = io.Copy(&stdoutBody, stdoutReader)
+	}()
+	go func() {
+		defer readers.Done()
+		_, stderrReadErr = io.Copy(&stderrBody, stderrReader)
+	}()
 
 	oldStdout, oldStderr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = stdoutWriter, stderrWriter
 	code = run(args)
 	os.Stdout, os.Stderr = oldStdout, oldStderr
-	if err := stdoutWriter.Close(); err != nil {
-		t.Fatalf("close stdout writer: %v", err)
-	}
-	if err := stderrWriter.Close(); err != nil {
-		t.Fatalf("close stderr writer: %v", err)
-	}
-
-	stdoutBody, err := io.ReadAll(stdoutReader)
-	if err != nil {
-		t.Fatalf("read stdout: %v", err)
-	}
-	stderrBody, err := io.ReadAll(stderrReader)
-	if err != nil {
-		t.Fatalf("read stderr: %v", err)
-	}
+	stdoutCloseErr := stdoutWriter.Close()
+	stderrCloseErr := stderrWriter.Close()
+	readers.Wait()
 	if err := stdoutReader.Close(); err != nil {
 		t.Fatalf("close stdout reader: %v", err)
 	}
 	if err := stderrReader.Close(); err != nil {
 		t.Fatalf("close stderr reader: %v", err)
 	}
+	if stdoutCloseErr != nil {
+		t.Fatalf("close stdout writer: %v", stdoutCloseErr)
+	}
+	if stderrCloseErr != nil {
+		t.Fatalf("close stderr writer: %v", stderrCloseErr)
+	}
+	if stdoutReadErr != nil {
+		t.Fatalf("read stdout: %v", stdoutReadErr)
+	}
+	if stderrReadErr != nil {
+		t.Fatalf("read stderr: %v", stderrReadErr)
+	}
 
-	return code, string(stdoutBody), string(stderrBody)
+	return code, stdoutBody.String(), stderrBody.String()
 }

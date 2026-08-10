@@ -214,7 +214,7 @@ func (r *Repo) Resolve(ref string) (string, error) {
 func (r *Repo) Describe(ref string) string {
 	out, _, err := r.RunAllowFail("describe", "--tags", "--always", ref)
 	if err != nil {
-		return shortSHA(ref)
+		return ShortSHA(ref)
 	}
 
 	return strings.TrimSpace(out)
@@ -435,7 +435,8 @@ func splitNUL(s string) []string {
 	return fields
 }
 
-func shortSHA(ref string) string {
+// ShortSHA truncates a commit identifier to the twelve characters used in reports.
+func ShortSHA(ref string) string {
 	if len(ref) > 12 {
 		return ref[:12]
 	}

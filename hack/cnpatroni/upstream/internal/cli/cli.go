@@ -398,7 +398,7 @@ func runReport(args []string, g globals, stdout, stderr io.Writer) int {
 	dir := *outDir
 	if dir == "" {
 		dir = filepath.Join(repo.Root, filepath.FromSlash(defaultReportDir),
-			fmt.Sprintf("%s-%s", r.Range.To.Date, shortSHA(r.Range.To.Commit)))
+			fmt.Sprintf("%s-%s", r.Range.To.Date, gitx.ShortSHA(r.Range.To.Commit)))
 	}
 	if err := writeReport(dir, r); err != nil {
 		_, _ = fmt.Fprintf(stderr, "%v\n", err)
@@ -559,12 +559,4 @@ func mergeDriverMessage(path string, clean bool) string {
 		"  git diff --merge-base HEAD MERGE_HEAD -- %s\n"+
 		"Then resolve the file and run `git add %s`.\n",
 		boundary.MergeDriverName, path, reason, path, path)
-}
-
-func shortSHA(commit string) string {
-	if len(commit) > 12 {
-		return commit[:12]
-	}
-
-	return commit
 }
