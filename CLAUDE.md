@@ -56,7 +56,9 @@ competing decision-maker is rejected regardless of how small the diff is.
 
 ## Rule 3 — engineering rules
 
-CloudNativePatroni uses the following engineering rules as its own conventions:
+These are CloudNativePatroni's engineering conventions, stated here in full.
+There is no larger set held elsewhere, so this rule is exhaustive and anything
+absent from it is not in force.
 
 - Sentence-case headings; no emoji anywhere, including code comments; em dashes
   are spaced (`word — word`); absolute timestamps as `YYYY-MM-DD HH:mm:ss UTC`;
@@ -65,10 +67,21 @@ CloudNativePatroni uses the following engineering rules as its own conventions:
   where the specification requires them.
 - Tests first. Write the failing test before the code, and cover negative,
   boundary, and error paths — not only the happy path.
-- Surgical changes only. Do not reformat or improve adjacent inherited code, and
-  do not create files that are not necessary.
+- Surgical changes only. Do not reformat or improve adjacent inherited code.
+  Prefer editing an existing file to adding one, and do not create files that
+  are not necessary.
 - Shell: `#!/usr/bin/env bash`, `set -Eeuo pipefail`, `IFS=$'\n\t'`, quoted
   expansions, `main "$@"` last, shellcheck-clean at `-S style`.
+- Fix at the cause, not the symptom. Never silence a gate, raise a threshold,
+  widen an allowlist or add an exclusion so that a check stops reporting; if a
+  gate is wrong, fix what it measures.
+- Before believing a check, make it produce the other answer. Break what it
+  asserts, watch it fail, then restore it. A check that has only ever been seen
+  to pass is indistinguishable from one that cannot fail. Worked examples are
+  in [`fork-maintenance.md`](docs/cnpatroni/fork-maintenance.md).
+- Report completely, including the detail that is inconvenient. State what
+  failed, what was skipped, and what could not be verified, rather than the
+  part that reads well.
 
 Where these meet inherited CloudNativePG conventions:
 
@@ -79,7 +92,7 @@ Where these meet inherited CloudNativePG conventions:
 | Commit subject length, present tense, no `--amend`, no force push | CloudNativePatroni. |
 | DCO `Signed-off-by` on every commit | CloudNativePG. It is additive, so keep `git commit -s`. |
 | Apache-2.0 headers on every Go and shell file | CloudNativePG and specification section 20.3. Copy the header from a neighbouring file, keeping the CloudNativePG copyright line intact. |
-| Emoji in push or pull-request summaries | No emoji. The professional-communication rule has an explicit precedence clause. |
+| Emoji in push or pull-request summaries | No emoji, in commits, pull requests or documentation. This project's conventions take precedence over any inherited habit that would permit them. |
 
 Never send `.claude/`, `.cursor/`, or `CLAUDE.md` in a patch aimed upstream.
 
