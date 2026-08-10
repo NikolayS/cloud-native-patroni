@@ -22,6 +22,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -180,12 +181,33 @@ func TestScanOfACleanModuleFindsNothing(t *testing.T) {
 }
 
 func TestScanReportsUncompilableCodeAsAToolError(t *testing.T) {
-	_, err := Scan(filepath.Join("testdata", "mod-broken"), loadFixtureRules(t))
+	moduleDir := t.TempDir()
+	for _, fixture := range []struct {
+		stored       string
+		materialised string
+	}{
+		{stored: "go.mod", materialised: "go.mod"},
+		{stored: filepath.Join("broken", "broken.go.txt"), materialised: filepath.Join("broken", "broken.go")},
+	} {
+		content, err := os.ReadFile(filepath.Join("testdata", "mod-broken", fixture.stored))
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", fixture.stored, err)
+		}
+		target := filepath.Join(moduleDir, fixture.materialised)
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+			t.Fatalf("create fixture directory for %s: %v", fixture.materialised, err)
+		}
+		if err := os.WriteFile(target, content, 0o600); err != nil {
+			t.Fatalf("materialise fixture %s: %v", fixture.materialised, err)
+		}
+	}
+
+	_, err := Scan(moduleDir, loadFixtureRules(t))
 	if err == nil {
 		t.Fatal("Scan of a module that does not compile returned no error")
 	}
-	if !strings.Contains(err.Error(), "broken") {
-		t.Errorf("error does not name the failing package: %v", err)
+	if !strings.Contains(err.Error(), "missing condition in if statement") {
+		t.Errorf("error does not contain the expected parser diagnostic: %v", err)
 	}
 }
 
