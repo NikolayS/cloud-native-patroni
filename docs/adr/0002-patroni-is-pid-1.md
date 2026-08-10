@@ -101,6 +101,12 @@ liveness probe against Patroni's `/liveness` endpoint.
 
 ## Known gaps
 
+- `no-postgres-survives-container-exit` currently passes on `linux/amd64` and
+  fails reproducibly on `linux/arm64`. The processes in the failing case do
+  eventually exit, and the cause is not established. Both observations were
+  taken on macOS, where Docker runs in a Linux virtual machine, so neither is
+  authoritative for a plain Linux host. The newly added container-contract CI
+  job is the first measurement on a representative host.
 - The live kind measurements in the Consequences section were taken on Apple
   silicon, arm64. `/proc/1/comm` can report `patroni` or `python3` depending on
   when it is sampled relative to Patroni's `setproctitle` call, so the recorded
