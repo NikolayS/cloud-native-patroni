@@ -22,10 +22,12 @@ SPDX-License-Identifier: Apache-2.0
 // against a curated classification, and fails when an unclassified path appears
 // (specification sections 9.1 and 9.3).
 //
-// The same binary renders docs/cnpatroni/authority-audit.md. Producing the
-// document and the gate from one program is deliberate: an audit written once by
-// hand and a checker written separately disagree within two upstream merges, and
-// then both are ignored.
+// The same binary renders the ignored local audit document and responsibility
+// map. The authority-audit workflow runs that renderer on every invocation and
+// uploads both outputs as one artifact. Producing the documents and the gate
+// from one program is deliberate: an audit written once by hand and a checker
+// written separately disagree within two upstream merges, and then both are
+// ignored.
 //
 //	audit scan       print the inventory
 //	audit check      fail on unclassified hits, baseline growth or stale entries
@@ -116,9 +118,9 @@ func parseFlags(command string, args []string) (*options, error) {
 	fs.StringVar(&opts.narrative, "narrative", "policy/authority-audit-narrative.md",
 		"prose fragment embedded in the generated audit document")
 	fs.StringVar(&opts.auditOut, "audit-out", "docs/cnpatroni/authority-audit.md",
-		"generated audit document, relative to the repository root")
+		"ignored generated audit document, relative to the repository root")
 	fs.StringVar(&opts.mapOut, "map-out", "docs/cnpatroni/responsibility-map.md",
-		"generated responsibility map, relative to the repository root")
+		"ignored generated responsibility map, relative to the repository root")
 	fs.StringVar(&opts.format, "format", "text", "text, github or json")
 	fs.StringVar(&opts.milestone, "milestone", "M0", "current milestone, for allowlist expiry")
 	fs.BoolVar(&opts.write, "write", false, "baseline: rewrite the recorded baseline")

@@ -31,6 +31,10 @@ tests/e2e/*_logs/
 # Spellcheck dictionary
 dictionary.dic
 
+# Generated CloudNativePatroni audit documents
+/docs/cnpatroni/authority-audit.md
+/docs/cnpatroni/responsibility-map.md
+
 # OLM ignores
 bundle/
 bundle.Dockerfile

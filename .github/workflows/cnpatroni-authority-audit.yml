@@ -55,13 +55,21 @@ jobs:
       - name: Check the authority policy
         run: go -C hack/cnpatroni/audit run . check --format=github
 
-      # The audit document and the responsibility map are generated. Regenerating
-      # them and refusing a difference is what stops the written audit and the
-      # checker from drifting apart, which is how audits stop being read.
-      - name: Verify the generated documents are current
-        run: |
-          go -C hack/cnpatroni/audit run . doc
-          git diff --exit-code -- docs/cnpatroni/
+      # The audit document and the responsibility map are generated on every run.
+      # A render failure fails the job, so classification data that no longer
+      # produces readable documents cannot pass the gate.
+      - name: Generate the authority documents
+        run: go -C hack/cnpatroni/audit run . doc
+
+      - name: Upload the authority documents
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cnpatroni-authority-audit
+          path: |
+            docs/cnpatroni/authority-audit.md
+            docs/cnpatroni/responsibility-map.md
+          retention-days: 90
+          if-no-files-found: error
 
       # The second layer of the ratchet. The per-bucket check above catches an
       # author who added a forbidden call. This catches the author who
