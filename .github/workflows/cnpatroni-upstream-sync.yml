@@ -1,0 +1,252 @@
+# Keeps CloudNativePatroni answerable about upstream CloudNativePG.
+#
+# Three jobs:
+#
+#   boundary-guard      runs on every pull request and push. It validates the
+#                       boundary manifest against the worktree, fails when this
+#                       fork has changed a file it never declared, and fails
+#                       when the generated .gitattributes no longer matches the
+#                       manifest. Mark it a required status check; without that
+#                       the whole system is advisory.
+#
+#   tool-vulncheck      scans this fork's upstream tooling module, which the
+#                       inherited govulncheck job does not cover.
+#
+#   divergence-report   runs weekly and on demand. It computes what upstream
+#                       has changed since the recorded baseline, intersects it
+#                       with the boundary manifest, and keeps exactly one open
+#                       tracking issue up to date.
+#
+# Scheduled workflows only fire from the repository's default branch. Until this
+# file reaches that branch, workflow_dispatch is the only trigger that works.
+name: cnpatroni-upstream-sync
+
+on:
+  pull_request:
+  # This fork's entire argument rests on these cheap gates catching regressions.
+  # A branch-pattern filter is a correctness risk disguised as a cost saving:
+  # any branch outside the pattern silently loses the gate.
+  push:
+  schedule:
+    # Mondays at 06:00 UTC.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+    inputs:
+      to_ref:
+        description: "Upstream ref to compare against"
+        required: false
+        default: "upstream/main"
+
+# boundary-guard and tool-vulncheck only read the tree; divergence-report
+# re-declares its own contents: read plus issues: write, which replaces this
+# block outright. Nothing here needs read access to packages, actions or
+# security events, so the fork's two workflows declare the same floor.
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: 'bash -Eeuo pipefail -x {0}'
+
+concurrency:
+  group: cnpatroni-upstream-sync-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  TOOL_DIR: hack/cnpatroni/upstream
+  ISSUE_LABEL: upstream-integration
+  ISSUE_MARKER: "<!-- cnpatroni-upstream-sync -->"
+
+jobs:
+
+  # The gate on our own changes.
+  boundary-guard:
+    name: Validate the CloudNativePatroni boundary manifest
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    steps:
+      -
+        name: Checkout with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The drift check compares HEAD with the recorded fork base, so the
+          # default shallow checkout is not enough.
+          fetch-depth: 0
+      -
+        name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: hack/cnpatroni/upstream/go.mod
+          check-latest: true
+      -
+        name: Build the upstream tool
+        # Never `go run` a tool whose exit code is read: go run reports 1 for
+        # every non-zero exit, which silently flattens the 0..6 lattice this
+        # workflow gates on.
+        run: |
+          cd "${TOOL_DIR}"
+          go build -o "${RUNNER_TEMP}/cnpatroni-upstream" ./cmd/cnpatroni-upstream
+      -
+        name: Unit-test the upstream tooling
+        run: |
+          cd "${TOOL_DIR}"
+          go vet ./...
+          go test ./...
+      # These two steps consume pass or fail only, never the tool's exit code,
+      # but they still invoke the binary built above rather than `go run`, so
+      # that no step in this file models an invocation that would flatten the
+      # exit code if it were copied into a step that publishes one.
+      -
+        name: Validate the manifest and check for undeclared changes
+        run: |
+          "${RUNNER_TEMP}/cnpatroni-upstream" --repo "${GITHUB_WORKSPACE}" validate --drift
+      -
+        name: Check the generated .gitattributes against the manifest
+        run: |
+          "${RUNNER_TEMP}/cnpatroni-upstream" --repo "${GITHUB_WORKSPACE}" gitattributes --check
+
+  # hack/cnpatroni/upstream is its own Go module, so the govulncheck job in
+  # continuous-integration.yml — which scans the root module and tests/ — never
+  # sees go.yaml.in/yaml/v3. This module executes on every pull request, so it
+  # is scanned here rather than in the inherited file, which upstream edits
+  # often (specification section 20.2). The action pin is the one that file
+  # already uses. Exposure is CI-runner-local: nothing in this module ships in
+  # the operator image.
+  #
+  # No event filter: the weekly schedule is worth a fresh scan, because the
+  # vulnerability database moves even when the module does not.
+  tool-vulncheck:
+    name: Run govulncheck on the upstream tooling module
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Run govulncheck (upstream tooling module)
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1
+        with:
+          go-version-file: hack/cnpatroni/upstream/go.mod
+          # Override the default value of "stable" for go-version-input.
+          # Without this, setup-go receives both go-version=stable and
+          # go-version-file, and ignores the file.
+          # See https://github.com/golang/go/issues/70036
+          go-version-input: ""
+          check-latest: true
+          work-dir: hack/cnpatroni/upstream
+
+  # The watch on upstream's changes.
+  divergence-report:
+    name: Report the divergence from upstream CloudNativePG
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      -
+        name: Checkout with full history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      -
+        name: Set up Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: hack/cnpatroni/upstream/go.mod
+          check-latest: true
+      # `go run` runs the program as a child process, prints "exit status N" on
+      # stderr and then exits 1 itself, so the tool's exit-code lattice never
+      # reaches the shell. The report step below publishes that code, so the
+      # binary is built once here and every step in this job invokes it.
+      -
+        name: Build the upstream tool
+        run: |
+          cd "${TOOL_DIR}"
+          go build -o "${RUNNER_TEMP}/cnpatroni-upstream" ./cmd/cnpatroni-upstream
+      -
+        # The tool resolves the manifest, the baseline and every git call from
+        # --repo, so it does not need to run from the module directory.
+        name: Configure the upstream remote
+        run: |
+          "${RUNNER_TEMP}/cnpatroni-upstream" --repo "${GITHUB_WORKSPACE}" setup
+      -
+        name: Compute the report
+        id: report
+        env:
+          TO_REF: ${{ inputs.to_ref || 'upstream/main' }}
+        run: |
+          set +e
+          "${RUNNER_TEMP}/cnpatroni-upstream" --repo "${GITHUB_WORKSPACE}" \
+            report --to "${TO_REF}" --stdout > "${RUNNER_TEMP}/report.md"
+          code=$?
+          set -e
+          echo "exit_code=${code}" >> "${GITHUB_OUTPUT}"
+
+          # The tracking issue is only touched when this run actually produced a
+          # report. Codes 4, 5 and 6 return before the report is written, and an
+          # empty body would overwrite the divergence recorded in the open issue.
+          ready=false
+          if [ "${code}" -ge 1 ] && [ "${code}" -le 3 ] && [ -s "${RUNNER_TEMP}/report.md" ]; then
+            ready=true
+          fi
+          echo "report_ready=${ready}" >> "${GITHUB_OUTPUT}"
+
+          cat "${RUNNER_TEMP}/report.md" >> "${GITHUB_STEP_SUMMARY}"
+      -
+        name: Upload the report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cnpatroni-upstream-report
+          path: docs/cnpatroni/upstream-integration/**
+          retention-days: 90
+          if-no-files-found: error
+      -
+        name: Update the tracking issue
+        # Only when this run produced a report. See the report step for why.
+        if: steps.report.outputs.report_ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "${ISSUE_MARKER}"
+            echo
+            cat "${RUNNER_TEMP}/report.md"
+            echo
+            echo "Produced by ${RUN_URL}."
+          } > "${RUNNER_TEMP}/issue-body.md"
+
+          # One open issue at a time, keyed on the label. Later runs edit that
+          # issue in place instead of opening a new one, so the schedule cannot
+          # spam the tracker. Closing the issue after an integration lands makes
+          # the next run open a fresh one.
+          existing=$(gh issue list --state open --label "${ISSUE_LABEL}" \
+            --limit 1 --json number --jq '.[0].number // empty')
+          if [ -n "${existing}" ]; then
+            gh issue edit "${existing}" --body-file "${RUNNER_TEMP}/issue-body.md"
+          else
+            gh issue create --title "Upstream CloudNativePG integration status" \
+              --label "${ISSUE_LABEL}" --body-file "${RUNNER_TEMP}/issue-body.md"
+          fi
+      -
+        name: Fail the run when the report needs a human
+        # A gate that can be skipped is not a gate. This step always runs, and it
+        # fails when the recorded code is missing, is not a number, or is at or
+        # above FAIL_AT. Enumerating individual codes is what made the previous
+        # version unreachable.
+        if: always()
+        env:
+          EXIT_CODE: ${{ steps.report.outputs.exit_code }}
+          FAIL_AT: "3"
+        run: |
+          code="${EXIT_CODE:-}"
+          if [[ ! "${code}" =~ ^[0-9]+$ ]]; then
+            echo "The report step recorded no usable exit code: '${code}'" >&2
+            exit 1
+          fi
+          if [ "${code}" -ge "${FAIL_AT}" ]; then
+            echo "cnpatroni-upstream exited ${code}." >&2
+            echo "3 or 4: the boundary manifest does not classify something upstream changed." >&2
+            echo "5: this workflow called the tool wrongly." >&2
+            echo "6: this clone cannot answer the question." >&2
+            echo "See the tracking issue and the step summary." >&2
+            exit 1
+          fi
+          echo "cnpatroni-upstream exited ${code}: nothing needs a human."

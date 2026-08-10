@@ -1,0 +1,6 @@
+# This manifest is exact target state for later operator generation. It is a
+# walking-skeleton stepping stone, not a substitute for the operator.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cnpatroni-poc

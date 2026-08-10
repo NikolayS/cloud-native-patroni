@@ -1,0 +1,13 @@
+name: s2-sigkill-oom
+subcases:
+  - name: inside-namespace-pid1-noop
+    signal: KILL
+  - name: host-namespace-pid1-kill
+    signal: KILL
+  - name: cgroup-v2-oom
+  - name: graceful-control
+    signal: TERM
+assertions:
+  - patroni-is-pid1
+  - no-postgres-in-old-cgroup
+  - no-second-authority

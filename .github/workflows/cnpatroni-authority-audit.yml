@@ -1,0 +1,228 @@
+# CloudNativePatroni HA authority audit.
+#
+# This is the static guardrail of specification section 9.3. It exists to stop an
+# upstream merge from silently reintroducing PostgreSQL high-availability
+# authority into a repository whose whole premise is that Patroni holds it.
+#
+# The code-hygiene job belongs here because it is also a fork-owned static gate
+# over the small CloudNativePatroni surface. Keeping both jobs together avoids a
+# workflow whose only purpose would be one script invocation.
+#
+# The jobs are deliberately separate from continuous-integration.yml. That file
+# is upstream's and is edited often; keeping the fork's gates in a file that
+# upstream does not have removes recurring merge conflicts (specification section 20.2).
+name: CNPatroni authority audit
+
+on:
+  # This fork's entire argument rests on these cheap gates catching regressions.
+  # A branch-pattern filter is a correctness risk disguised as a cost saving:
+  # any branch outside the pattern silently loses the gate.
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  code-hygiene:
+    name: Check CloudNativePatroni code hygiene
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The ownership ratchet comparison needs the merge base of the pull request.
+          fetch-depth: 0
+
+      - name: Install Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Reject unreachable or duplicated code
+        run: ./hack/cnpatroni/check-code-hygiene.sh
+
+      # The hygiene gate derives its scan set from boundary.yaml and therefore
+      # trusts that manifest. This ratchet stops a one-word reclassification
+      # from shrinking the scanned set in silence. It only protects what it
+      # runs on: mark this job a required status check on main, otherwise the
+      # ratchet is advisory.
+      - name: Verify the ownership boundary did not shrink
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+          else
+            # A direct push to main bypasses the pull request, so there is no
+            # merge base. Compare against the commit this one replaced, which
+            # is the tip main carried before the push for a single commit and
+            # the first parent for a merge.
+            base="$(git rev-parse "HEAD^")"
+          fi
+
+          # The pull request that introduces the manifest has no merge-base copy
+          # to ratchet against, because the fork base is upstream's tree and
+          # upstream carries no manifest. Bootstrap only from the recorded fork
+          # base, so a missing manifest anywhere else still fails closed.
+          #
+          # The manifest is deliberately not pinned by blob the way the
+          # authority baseline is. The baseline must not move during bootstrap,
+          # but the manifest is edited throughout it by design, and a pin would
+          # have to be rewritten on every edit. A missing base manifest makes
+          # this comparison vacuous rather than weaker: there is no earlier
+          # ownership for the change to shrink.
+          if ! git cat-file -e \
+            "${base}:hack/cnpatroni/upstream/boundary.yaml" 2>/dev/null
+          then
+            bootstrap_base="b22682115c5f3ad1bfe69bed719151d0db918e39"
+
+            if [[ "${base}" != "${bootstrap_base}" ]]; then
+              echo "The merge base has no ownership boundary manifest and is not the bootstrap base." >&2
+              exit 1
+            fi
+
+            echo "No merge-base manifest exists yet; there is no earlier ownership to ratchet against."
+            exit 0
+          fi
+
+          git show "${base}:hack/cnpatroni/upstream/boundary.yaml" \
+            > "${RUNNER_TEMP}/boundary-base.yaml"
+          go -C hack/cnpatroni/upstream run ./cmd/cnpatroni-upstream \
+            --repo "${GITHUB_WORKSPACE}" ownership-ratchet \
+            --base "${RUNNER_TEMP}/boundary-base.yaml"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+
+  authority-audit:
+    name: Run the authority audit
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          # The baseline comparison needs the merge base of the pull request.
+          fetch-depth: 0
+
+      - name: Install Go
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Test the audit scanner
+        run: go -C hack/cnpatroni/audit test ./...
+
+      - name: Test the runtime lifecycle guard
+        run: go test ./internal/cnpatroni/guard/...
+
+      # The gate. Exit 1 is a policy violation: an unclassified authority hit, a
+      # new forbidden call, a bucket that grew, an expired allowlist entry.
+      # Exit 2 is a tool or configuration error, most often a tree that does not
+      # type-check, and says so rather than passing itself off as compliance.
+      # Exit 3 is hygiene: a baseline that can be tightened, or a classification
+      # that no longer describes real code.
+      - name: Check the authority policy
+        run: go -C hack/cnpatroni/audit run . check --format=github
+
+      # The audit document and the responsibility map are generated on every run.
+      # A render failure fails the job, so classification data that no longer
+      # produces readable documents cannot pass the gate.
+      - name: Generate the authority documents
+        run: go -C hack/cnpatroni/audit run . doc
+
+      - name: Upload the authority documents
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cnpatroni-authority-audit
+          path: |
+            docs/cnpatroni/authority-audit.md
+            docs/cnpatroni/responsibility-map.md
+          retention-days: 90
+          if-no-files-found: error
+
+      # The second layer of the ratchet. The per-bucket check above catches an
+      # author who added a forbidden call. This catches the author who
+      # regenerated the baseline to make that check green, because the
+      # regenerated file is compared against the one the branch had before.
+      #
+      # This is the layer worth protecting, and it only protects what it runs
+      # on: mark this job a required status check on main, otherwise the whole
+      # audit is advisory.
+      - name: Verify the authority baseline did not grow
+        if: github.event_name == 'pull_request' || github.event_name == 'push'
+        run: |
+          set -Eeuo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            base="$(git merge-base "origin/${BASE_REF}" HEAD)"
+          else
+            # A direct push to main bypasses the pull request, so there is no
+            # merge base. Compare against the commit this one replaced, which
+            # is the tip main carried before the push for a single commit and
+            # the first parent for a merge.
+            base="$(git rev-parse "HEAD^")"
+          fi
+
+          # The pull request that introduces this audit has no merge-base
+          # baseline to compare. Bootstrap only from the recorded fork base and
+          # only with the exact inaugural baseline blob. This keeps the ratchet
+          # fail-closed for a changed bootstrap baseline and for every later
+          # pull request.
+          if ! git cat-file -e \
+            "${base}:hack/cnpatroni/audit/policy/authority-baseline.yaml" 2>/dev/null
+          then
+            bootstrap_base="b22682115c5f3ad1bfe69bed719151d0db918e39"
+            bootstrap_baseline_blob="5389e6a53e13300cee41d29d2d28fa6bbab587e3"
+            current_baseline_blob="$(
+              git hash-object hack/cnpatroni/audit/policy/authority-baseline.yaml
+            )"
+
+            if [[ "${base}" != "${bootstrap_base}" ]]; then
+              echo "The merge base has no authority baseline and is not the bootstrap base." >&2
+              exit 1
+            fi
+            if [[ "${current_baseline_blob}" != "${bootstrap_baseline_blob}" ]]; then
+              echo "The inaugural authority baseline changed during bootstrap." >&2
+              exit 1
+            fi
+
+            echo "Verified the inaugural authority baseline; no merge-base baseline exists yet."
+            exit 0
+          fi
+
+          git show "${base}:hack/cnpatroni/audit/policy/authority-baseline.yaml" \
+            > "${RUNNER_TEMP}/baseline-base.yaml"
+          go -C hack/cnpatroni/audit run . baseline \
+            --compare "${RUNNER_TEMP}/baseline-base.yaml"
+        env:
+          BASE_REF: ${{ github.base_ref }}
+
+  # hack/cnpatroni/audit is its own Go module, so the govulncheck job in
+  # continuous-integration.yml — which scans the root module and tests/ — never
+  # sees golang.org/x/tools, golang.org/x/mod, golang.org/x/sync or
+  # go.yaml.in/yaml/v3. This module executes on every pull request, so it is
+  # scanned here rather than in the inherited file, which upstream edits often
+  # (specification section 20.2). The action pin is the one that file already
+  # uses. Exposure is CI-runner-local: nothing in this module ships in the
+  # operator image.
+  audit-vulncheck:
+    name: Run govulncheck on the audit module
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Run govulncheck (audit module)
+        uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1
+        with:
+          go-version-file: hack/cnpatroni/audit/go.mod
+          # Override the default value of "stable" for go-version-input.
+          # Without this, setup-go receives both go-version=stable and
+          # go-version-file, and ignores the file.
+          # See https://github.com/golang/go/issues/70036
+          go-version-input: ""
+          check-latest: true
+          work-dir: hack/cnpatroni/audit

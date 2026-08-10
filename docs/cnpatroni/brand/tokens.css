@@ -1,0 +1,147 @@
+/*
+ * tokens.css — CloudNativePatroni brand tokens.
+ * Licensed under the repository root LICENSE.
+ */
+
+:root {
+  /* Basalt ramp */
+  --cnpatroni-basalt-50: #FAF8F4;
+  --cnpatroni-basalt-100: #F3EFE8;
+  --cnpatroni-basalt-200: #E6DFD3;
+  --cnpatroni-basalt-300: #D2C8B7;
+  --cnpatroni-basalt-400: #B0A492;
+  --cnpatroni-basalt-500: #827868;
+  --cnpatroni-basalt-600: #6E6558;
+  --cnpatroni-basalt-700: #565043;
+  --cnpatroni-basalt-800: #3D3832;
+  --cnpatroni-basalt-900: #26231F;
+  --cnpatroni-basalt-950: #16140F;
+
+  /* Garnet ramp */
+  --cnpatroni-garnet-50: #FDF1F6;
+  --cnpatroni-garnet-100: #FBE0EC;
+  --cnpatroni-garnet-200: #F6C2D9;
+  --cnpatroni-garnet-300: #EE97BA;
+  --cnpatroni-garnet-400: #E06894;
+  --cnpatroni-garnet-500: #CE4478;
+  --cnpatroni-garnet-600: #A9265A;
+  --cnpatroni-garnet-700: #8A1D49;
+  --cnpatroni-garnet-800: #6B1739;
+  --cnpatroni-garnet-900: #4C1029;
+  --cnpatroni-garnet-950: #2C0917;
+
+  /* Moss ramp */
+  --cnpatroni-moss-200: #DCE8B4;
+  --cnpatroni-moss-300: #B9C97A;
+  --cnpatroni-moss-400: #9AAE55;
+  --cnpatroni-moss-500: #7C8F3C;
+  --cnpatroni-moss-600: #62722C;
+  --cnpatroni-moss-700: #4C591F;
+  --cnpatroni-moss-800: #354013;
+
+  /* Typography */
+  --cnpatroni-font-sans: "IBM Plex Sans", "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif;
+  --cnpatroni-font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --cnpatroni-size-100: 0.75rem;
+  --cnpatroni-leading-100: 1.25rem;
+  --cnpatroni-size-200: 0.875rem;
+  --cnpatroni-leading-200: 1.375rem;
+  --cnpatroni-size-300: 1rem;
+  --cnpatroni-leading-300: 1.625rem;
+  --cnpatroni-size-400: 1.125rem;
+  --cnpatroni-leading-400: 1.75rem;
+  --cnpatroni-size-500: 1.25rem;
+  --cnpatroni-leading-500: 1.75rem;
+  --cnpatroni-size-600: 1.5rem;
+  --cnpatroni-leading-600: 2rem;
+  --cnpatroni-size-700: 1.875rem;
+  --cnpatroni-leading-700: 2.375rem;
+  --cnpatroni-size-800: 2.375rem;
+  --cnpatroni-leading-800: 2.875rem;
+  --cnpatroni-size-900: 3rem;
+  --cnpatroni-leading-900: 3.375rem;
+  --cnpatroni-weight-regular: 400;
+  --cnpatroni-weight-medium: 500;
+  --cnpatroni-weight-semibold: 600;
+  --cnpatroni-weight-bold: 700;
+  --cnpatroni-tracking-tight: -0.01em;
+  --cnpatroni-tracking-normal: 0;
+  --cnpatroni-tracking-wide: 0.01em;
+
+  /* Structure */
+  --cnpatroni-radius-sm: 2px;
+  --cnpatroni-radius-md: 4px;
+  --cnpatroni-radius-lg: 8px;
+  --cnpatroni-border-width: 1px;
+  --cnpatroni-focus-width: 2px;
+  --cnpatroni-focus-offset: 2px;
+
+  /* Light theme */
+  --cnpatroni-surface: #FAF8F4;
+  --cnpatroni-surface-raised: #FFFFFF;
+  --cnpatroni-surface-sunken: #F3EFE8;
+  --cnpatroni-text: #26231F;
+  --cnpatroni-text-secondary: #565043;
+  --cnpatroni-text-muted: #6E6558;
+  --cnpatroni-text-on-primary: #FFFFFF;
+  --cnpatroni-link: #A9265A;
+  --cnpatroni-link-hover: #8A1D49;
+  --cnpatroni-brand-primary: #CE4478;
+  --cnpatroni-brand-secondary: #827868;
+  --cnpatroni-brand-accent: #62722C;
+  --cnpatroni-border-subtle: #E6DFD3;
+  --cnpatroni-border-strong: #827868;
+  --cnpatroni-focus-ring: #A9265A;
+  --cnpatroni-code-bg: #F3EFE8;
+  --cnpatroni-code-text: #3D3832;
+  --cnpatroni-status-success: #1C7A50;
+  --cnpatroni-status-warning: #96591A;
+  --cnpatroni-status-danger: #B32B22;
+  --cnpatroni-status-info: #6E6558;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --cnpatroni-surface: #16140F;
+    --cnpatroni-surface-raised: #26231F;
+    --cnpatroni-surface-sunken: #26231F;
+    --cnpatroni-text: #FAF8F4;
+    --cnpatroni-text-secondary: #D2C8B7;
+    --cnpatroni-text-muted: #B0A492;
+    --cnpatroni-text-on-primary: #16140F;
+    --cnpatroni-link: #EE97BA;
+    --cnpatroni-link-hover: #F6C2D9;
+    --cnpatroni-brand-accent: #B9C97A;
+    --cnpatroni-border-subtle: #3D3832;
+    --cnpatroni-border-strong: #6E6558;
+    --cnpatroni-focus-ring: #EE97BA;
+    --cnpatroni-code-bg: #26231F;
+    --cnpatroni-code-text: #E6DFD3;
+    --cnpatroni-status-success: #5DC48F;
+    --cnpatroni-status-warning: #DFA84E;
+    --cnpatroni-status-danger: #F0908A;
+    --cnpatroni-status-info: #B0A492;
+  }
+}
+
+:root[data-theme="dark"] {
+  --cnpatroni-surface: #16140F;
+  --cnpatroni-surface-raised: #26231F;
+  --cnpatroni-surface-sunken: #26231F;
+  --cnpatroni-text: #FAF8F4;
+  --cnpatroni-text-secondary: #D2C8B7;
+  --cnpatroni-text-muted: #B0A492;
+  --cnpatroni-text-on-primary: #16140F;
+  --cnpatroni-link: #EE97BA;
+  --cnpatroni-link-hover: #F6C2D9;
+  --cnpatroni-brand-accent: #B9C97A;
+  --cnpatroni-border-subtle: #3D3832;
+  --cnpatroni-border-strong: #6E6558;
+  --cnpatroni-focus-ring: #EE97BA;
+  --cnpatroni-code-bg: #26231F;
+  --cnpatroni-code-text: #E6DFD3;
+  --cnpatroni-status-success: #5DC48F;
+  --cnpatroni-status-warning: #DFA84E;
+  --cnpatroni-status-danger: #F0908A;
+  --cnpatroni-status-info: #B0A492;
+}

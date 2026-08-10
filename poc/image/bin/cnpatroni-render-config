@@ -1,0 +1,260 @@
+#!/opt/cnpatroni/venv/bin/python3
+##
+## Copyright © contributors to CloudNativePG, established as
+## CloudNativePG a Series of LF Projects, LLC.
+##
+## Licensed under the Apache License, Version 2.0 (the "License");
+## you may not use this file except in compliance with the License.
+## You may obtain a copy of the License at
+##
+##     http://www.apache.org/licenses/LICENSE-2.0
+##
+## Unless required by applicable law or agreed to in writing, software
+## distributed under the License is distributed on an "AS IS" BASIS,
+## WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+## See the License for the specific language governing permissions and
+## limitations under the License.
+##
+## SPDX-License-Identifier: Apache-2.0
+
+"""Render Patroni configuration from the Pod contract without exposing secrets."""
+
+from __future__ import annotations
+
+import os
+import stat
+import sys
+import uuid
+from pathlib import Path
+from typing import NoReturn
+
+import yaml
+
+
+class ConfigurationError(Exception):
+    """An input error that is safe to report without disclosing a password."""
+
+
+def required_environment(name: str) -> str:
+    """Return a required non-empty environment value."""
+    value = os.environ.get(name)
+    if not value:
+        raise ConfigurationError(f"required environment variable is unset or empty: {name}")
+    return value
+
+
+def environment_with_default(name: str, default: str) -> str:
+    """Return an optional environment value, using the contract default when empty."""
+    return os.environ.get(name) or default
+
+
+def read_secret(directory: Path, filename: str) -> str:
+    """Read one secret, removing at most one trailing line-feed byte."""
+    path = directory / filename
+    try:
+        value = path.read_bytes()
+    except OSError:
+        raise ConfigurationError(f"required secret file is missing or unreadable: {path}") from None
+    if value.endswith(b"\n"):
+        value = value[:-1]
+    if not value:
+        raise ConfigurationError(f"required secret file is empty: {path}")
+    try:
+        return value.decode("utf-8")
+    except UnicodeDecodeError:
+        raise ConfigurationError(f"required secret file is not valid UTF-8: {path}") from None
+
+
+def assert_distinct_credentials(credentials: dict[str, str]) -> None:
+    """Reject every pair of roles that shares a credential."""
+    roles = list(credentials)
+    for index, left_role in enumerate(roles):
+        for right_role in roles[index + 1 :]:
+            if credentials[left_role] == credentials[right_role]:
+                raise ConfigurationError(
+                    f"credentials for {left_role} and {right_role} must be distinct"
+                )
+
+
+def build_configuration() -> tuple[dict[str, object], Path]:
+    """Build the complete Patroni configuration and return its target path."""
+    scope = required_environment("CNPATRONI_SCOPE")
+    name = required_environment("CNPATRONI_NAME")
+    namespace = required_environment("CNPATRONI_NAMESPACE")
+    pod_ip = required_environment("CNPATRONI_POD_IP")
+    superuser_name = environment_with_default("CNPATRONI_SUPERUSER_NAME", "postgres")
+    replication_name = environment_with_default(
+        "CNPATRONI_REPLICATION_NAME", "cnpatroni_replication"
+    )
+    rewind_name = environment_with_default("CNPATRONI_REWIND_NAME", "cnpatroni_rewind")
+    restapi_username = environment_with_default(
+        "CNPATRONI_RESTAPI_USERNAME", "cnpatroni_restapi"
+    )
+    pgdata = environment_with_default("PGDATA", "/var/lib/postgresql/pgdata")
+    output_path = Path(
+        environment_with_default("CNPATRONI_CONFIG_FILE", "/etc/cnpatroni/patroni.yml")
+    )
+    secrets_directory = Path(
+        environment_with_default("CNPATRONI_SECRETS_DIR", "/etc/cnpatroni/secrets")
+    )
+
+    credentials = {
+        "superuser": read_secret(secrets_directory, "superuser-password"),
+        "replication": read_secret(secrets_directory, "replication-password"),
+        "rewind": read_secret(secrets_directory, "rewind-password"),
+        "restapi": read_secret(secrets_directory, "restapi-password"),
+        "app": read_secret(secrets_directory, "app-password"),
+    }
+    assert_distinct_credentials(credentials)
+
+    pg_hba = [
+        "local all all peer",
+        "host all all 127.0.0.1/32 scram-sha-256",
+        "host all all ::1/128 scram-sha-256",
+        f"host replication {replication_name} all scram-sha-256",
+        f"host all {rewind_name} all scram-sha-256",
+        "host all all all scram-sha-256",
+    ]
+
+    configuration: dict[str, object] = {
+        "scope": scope,
+        "name": name,
+        "restapi": {
+            "listen": "0.0.0.0:8008",
+            "connect_address": f"{pod_ip}:8008",
+            "authentication": {
+                "username": restapi_username,
+                "password": credentials["restapi"],
+            },
+        },
+        "kubernetes": {
+            "namespace": namespace,
+            "use_endpoints": True,
+            "scope_label": "cnpatroni.io/cluster",
+            "role_label": "cnpatroni.io/role",
+            "leader_label_value": "primary",
+            "follower_label_value": "replica",
+            "standby_leader_label_value": "primary",
+            "pod_ip": pod_ip,
+            "ports": [{"name": "postgresql", "port": 5432}],
+            "labels": {"cnpatroni.io/managed-by": "patroni"},
+        },
+        "bootstrap": {
+            "dcs": {
+                # Fencing requires ttl >= loop_wait + retry_timeout
+                # + failureThreshold x periodSeconds + timeoutSeconds
+                # + probe terminationGracePeriodSeconds + safetyMargin.
+                # Here: 45 >= 10 + 10 + 3 x 5 + 2 + 3 + 5.
+                "ttl": 45,
+                "loop_wait": 10,
+                "retry_timeout": 10,
+                "maximum_lag_on_failover": 1048576,
+                "check_timeline": True,
+                "failsafe_mode": True,
+                "postgresql": {
+                    "use_pg_rewind": True,
+                    "use_slots": True,
+                    "parameters": {
+                        "wal_level": "replica",
+                        "hot_standby": "on",
+                        "max_wal_senders": 10,
+                        "max_replication_slots": 10,
+                        "wal_log_hints": "on",
+                    },
+                },
+            },
+            "initdb": [
+                {"encoding": "UTF8"},
+                {"locale": "en_US.utf8"},
+                "data-checksums",
+            ],
+            "pg_hba": list(pg_hba),
+            "post_bootstrap": "/usr/local/bin/cnpatroni-post-bootstrap",
+        },
+        "postgresql": {
+            "listen": "0.0.0.0:5432",
+            "connect_address": f"{pod_ip}:5432",
+            "data_dir": pgdata,
+            "bin_dir": "/usr/lib/postgresql/18/bin",
+            "pgpass": "/var/lib/postgresql/pgpass",
+            "authentication": {
+                "superuser": {
+                    "username": superuser_name,
+                    "password": credentials["superuser"],
+                },
+                "replication": {
+                    "username": replication_name,
+                    "password": credentials["replication"],
+                },
+                "rewind": {
+                    "username": rewind_name,
+                    "password": credentials["rewind"],
+                },
+            },
+            "parameters": {"password_encryption": "scram-sha-256"},
+            "pg_hba": list(pg_hba),
+        },
+        "tags": {
+            "nofailover": False,
+            "noloadbalance": False,
+            "clonefrom": False,
+            "nosync": False,
+        },
+    }
+    return configuration, output_path
+
+
+def write_configuration(configuration: dict[str, object], output_path: Path) -> None:
+    """Atomically write a private configuration file in its destination directory."""
+    output_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    temporary_path = output_path.parent / f".{output_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_EXCL
+    descriptor = os.open(temporary_path, flags, 0o600)
+    try:
+        mode = stat.S_IMODE(os.fstat(descriptor).st_mode)
+        if mode & 0o077:
+            raise ConfigurationError("temporary configuration mode is more permissive than 0600")
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+            descriptor = -1
+            yaml.safe_dump(
+                configuration,
+                stream,
+                default_flow_style=False,
+                sort_keys=False,
+                allow_unicode=True,
+            )
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary_path, output_path)
+        final_mode = stat.S_IMODE(output_path.stat().st_mode)
+        if final_mode & 0o077:
+            raise ConfigurationError("rendered configuration mode is more permissive than 0600")
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            temporary_path.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def abort(message: str) -> NoReturn:
+    """Report a non-secret error and exit unsuccessfully."""
+    print(f"cnpatroni-render-config: error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def main() -> None:
+    """Render the configured Patroni document."""
+    os.umask(0o077)
+    try:
+        configuration, output_path = build_configuration()
+        write_configuration(configuration, output_path)
+    except ConfigurationError as error:
+        abort(str(error))
+    except Exception:
+        abort("failed to render configuration")
+
+
+if __name__ == "__main__":
+    main()

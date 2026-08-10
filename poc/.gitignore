@@ -1,0 +1,3 @@
+# Counter the root *.test and bundle/ patterns so required PoC sources stay visible.
+!image/test/Dockerfile.test
+!oracle/internal/bundle/

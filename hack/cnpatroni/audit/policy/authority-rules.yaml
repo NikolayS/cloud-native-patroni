@@ -1,0 +1,199 @@
+# The rule set of the CloudNativePatroni HA authority audit.
+#
+# Rules are policy data rather than Go source on purpose: changing what counts as
+# an authority hit is then a review of a policy change, not of a code change.
+#
+# Severity:
+#   forbidden  an operation specification section 7.4 forbids. Hits must be
+#              classified and are counted in the baseline, which may fall and
+#              must never rise.
+#   inventory  a path that is not itself a violation but must be triaged. Hits
+#              must be classified. They do not enter the baseline.
+#   observe    the remaining specification section 9.1 search terms. Counted for
+#              the coverage table, never gated.
+#
+# "..." expands to the module path below, so that symbols stay readable while the
+# scanner still compares fully qualified names.
+
+schema: cnpatroni-authority-rules/v1
+
+module: github.com/cloudnative-pg/cloudnative-pg
+
+guard_symbol: .../internal/cnpatroni/guard.Forbidden
+
+scope:
+  roots:
+    - .
+    - ./tests
+  exclude_paths:
+    - vendor/**
+    - licenses/**
+    - dist/**
+    - bin/**
+  exclude_generated: true
+  include_tests: false
+
+rules:
+  - id: proc.promote
+    severity: forbidden
+    spec: "7.4, bullet 1"
+    message: promotion is Patroni's; no CloudNativePatroni code promotes PostgreSQL
+    calls:
+      - .../pkg/management/postgres.(*Instance).PromoteAndWait
+
+  - id: proc.startstop
+    severity: forbidden
+    spec: "7.4, bullet 2"
+    message: starting, stopping and restarting the postmaster belongs to Patroni
+    calls:
+      - .../pkg/management/postgres.(*Instance).Startup
+      - .../pkg/management/postgres.(*Instance).Shutdown
+      - .../pkg/management/postgres.(*Instance).Reload
+      - .../pkg/management/postgres.(*Instance).Run
+      - .../pkg/management/postgres.(*Instance).TryShuttingDownSmartFast
+      - .../pkg/management/postgres.(*Instance).TryShuttingDownFastImmediate
+      - .../pkg/management/postgres.(*Instance).RequestFastImmediateShutdown
+      - .../pkg/management/postgres.(*Instance).RequestAndWaitRestartSmartFast
+      - .../pkg/management/postgres.(*Instance).GetInstanceCommandChan
+      - .../pkg/management/postgres.(*Instance).HandleInstanceCommandRequests
+      - .../pkg/management/postgres.(*Instance).WithActiveInstance
+
+  - id: proc.exec-binary
+    severity: forbidden
+    spec: "7.4, bullets 1 and 2"
+    message: no CloudNativePatroni code execs a PostgreSQL lifecycle binary
+    calls:
+      - os/exec.Command
+      - os/exec.CommandContext
+    call_arg_contains:
+      - pg_ctl
+      - pg_rewind
+      - pg_basebackup
+      - initdb
+      - pg_upgrade
+
+  - id: recovery.standby-signal
+    severity: forbidden
+    spec: "7.4, bullet 3"
+    message: standby.signal and the recovery topology are written by Patroni
+    literals:
+      - standby.signal
+    calls:
+      - .../pkg/management/postgres.createStandbySignal
+      - .../pkg/management/postgres.UpdateReplicaConfiguration
+      - .../pkg/management/postgres.(*Instance).Demote
+      - .../pkg/management/postgres.(*Instance).RefreshReplicaConfiguration
+
+  - id: recovery.conninfo
+    severity: forbidden
+    spec: "7.4, bullet 4"
+    message: primary_conninfo and primary_slot_name are written by Patroni
+    literals:
+      - primary_conninfo
+      - primary_slot_name
+    calls:
+      - .../pkg/management/postgres.(*Instance).GetPrimaryConnInfo
+
+  - id: sync.standby-names
+    severity: forbidden
+    spec: "7.4, bullet 5"
+    message: synchronous_standby_names is computed by Patroni's synchronous mode
+    literals:
+      - synchronous_standby_names
+    calls:
+      - .../pkg/postgres/replication.GetSynchronousStandbyNames
+      - .../pkg/postgres.(*SynchronousStandbyNamesConfig).String
+
+  - id: rewind
+    severity: forbidden
+    spec: "7.4, bullet 6"
+    message: former-primary reconciliation is Patroni's use_pg_rewind
+    calls:
+      - .../pkg/management/postgres.(*Instance).Rewind
+      - .../pkg/management/postgres.(*Instance).managePgControlFileBackup
+      - .../pkg/management/postgres.(*Instance).removePgControlFileBackup
+      - .../pkg/management/postgres.(*Instance).CleanUpStalePid
+
+  - id: election.candidate
+    severity: forbidden
+    spec: "7.4, bullet 7"
+    message: selecting a promotion candidate is Patroni's leader race
+    calls:
+      - .../pkg/postgres.(*PostgresqlStatusList).Less
+      - .../internal/controller.(*ClusterReconciler).reconcileTargetPrimaryFromPods
+      - .../internal/controller.(*ClusterReconciler).reconcileTargetPrimaryForNonReplicaCluster
+      - .../internal/controller.(*ClusterReconciler).reconcileTargetPrimaryForReplicaCluster
+      - .../internal/controller.(*ClusterReconciler).setPrimaryOnSchedulableNode
+      - .../internal/controller.(*ClusterReconciler).setPrimaryInstance
+      - .../internal/controller.(*ClusterReconciler).switchPrimary
+      - .../internal/controller.(*ClusterReconciler).updatePrimaryPod
+      - .../internal/controller.(*ClusterReconciler).markOldPrimaryAsUnhealthy
+      - .../internal/controller.(*ClusterReconciler).evaluateQuorumCheck
+
+  - id: lease.primary
+    severity: forbidden
+    spec: "7.4, bullet 8"
+    message: the leader lock is Patroni's DCS lock, not a Kubernetes Lease we hold
+    imports:
+      - k8s.io/client-go/tools/leaderelection
+      - k8s.io/client-go/tools/leaderelection/resourcelock
+
+  - id: role.target-primary
+    severity: forbidden
+    spec: "7.4, bullet 9"
+    message: the desired primary is never chosen by the operator
+    field_writes:
+      - .../api/v1.ClusterStatus.TargetPrimary
+
+  - id: role.label
+    severity: forbidden
+    spec: "8.1"
+    message: the instance role label is Patroni's role_label
+    calls:
+      - .../pkg/utils.SetInstanceRole
+
+  - id: fencing.annotation
+    severity: forbidden
+    spec: "12.3"
+    message: fencing is a competing stop authority
+    calls:
+      - .../pkg/management/postgres.(*Instance).RequestFencingOn
+      - .../pkg/management/postgres.(*Instance).RequestAndWaitFencingOff
+      - .../pkg/utils.GetFencedInstances
+      - .../pkg/utils.NewFencingMetadataExecutor
+
+  - id: imgr.online-upgrade
+    severity: forbidden
+    spec: "8.3"
+    message: replacing the running binary in place breaks the lifecycle-root contract
+    calls:
+      - syscall.Exec
+
+  - id: guard.call
+    severity: inventory
+    spec: "9.3"
+    message: guard call sites are inventoried so that the wiring can be verified
+    calls:
+      - .../internal/cnpatroni/guard.Forbidden
+
+  - id: role.current-primary-read
+    severity: observe
+    spec: "8.12"
+    message: >-
+      reading the observed primary is not authority, but it becomes wrong wherever
+      it gates behaviour; specification section 8.12 requires Pod-local components
+      to ask Patroni instead
+    field_reads:
+      - .../api/v1.ClusterStatus.CurrentPrimary
+
+  - id: term.coverage
+    severity: observe
+    spec: "9.1"
+    message: the remaining specification section 9.1 search terms
+    literals:
+      - coordination.k8s.io
+      - restore_command
+      - recovery_target
+      - promotionToken
+      - fencedInstances
+      - cnpg.io/instanceRole

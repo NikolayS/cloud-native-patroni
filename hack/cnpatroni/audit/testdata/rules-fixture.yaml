@@ -1,0 +1,73 @@
+schema: cnpatroni-authority-rules/v1
+
+module: example.com/hits
+
+guard_symbol: .../guard.Forbidden
+
+scope:
+  roots:
+    - .
+  exclude_paths:
+    - vendor/**
+  exclude_generated: true
+  include_tests: false
+
+rules:
+  - id: proc.promote
+    severity: forbidden
+    spec: "7.4 bullet 1"
+    message: pg_ctl promote belongs to Patroni
+    calls:
+      - .../pg.(*Instance).PromoteAndWait
+
+  - id: proc.startstop
+    severity: forbidden
+    spec: "7.4 bullet 2"
+    message: stopping PostgreSQL belongs to Patroni
+    calls:
+      - .../pg.(*Instance).Shutdown
+
+  - id: proc.exec-pgctl
+    severity: forbidden
+    spec: "7.4 bullet 1"
+    message: invoking pg_ctl belongs to Patroni
+    calls:
+      - os/exec.Command
+      - os/exec.CommandContext
+    call_arg_contains:
+      - pg_ctl
+
+  - id: lease.primary
+    severity: forbidden
+    spec: "7.4 bullet 8"
+    message: the leader lock is Patroni's DCS lock
+    imports:
+      - example.com/hits/lease
+
+  - id: recovery.standby-signal
+    severity: forbidden
+    spec: "7.4 bullet 3"
+    message: writing standby.signal belongs to Patroni
+    literals:
+      - standby.signal
+
+  - id: role.target-primary
+    severity: forbidden
+    spec: "7.4 bullet 9"
+    message: the desired primary is chosen by Patroni
+    field_writes:
+      - .../api.ClusterStatus.TargetPrimary
+
+  - id: role.current-primary-read
+    severity: observe
+    spec: "8.12"
+    message: reads of the observed primary are inventoried, not forbidden
+    field_reads:
+      - .../api.ClusterStatus.CurrentPrimary
+
+  - id: guard.call
+    severity: inventory
+    spec: "9.3"
+    message: guard call sites are inventoried so the wiring can be verified
+    calls:
+      - .../guard.Forbidden

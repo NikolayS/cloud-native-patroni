@@ -1,0 +1,1 @@
+{"expected_nodes":["pod-a","pod-b","pod-c"],"description":"One acknowledged writer and one unresolved direct-Pod attempt."}

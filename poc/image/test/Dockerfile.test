@@ -1,0 +1,27 @@
+ARG CNPATRONI_BASE_IMAGE=cnpatroni-postgres:18.4-patroni-4.1.4-poc1
+FROM ${CNPATRONI_BASE_IMAGE}
+
+USER root
+
+RUN /opt/cnpatroni/venv/bin/pip install --no-cache-dir \
+      pysyncobj==0.3.14 cryptography==46.0.4 \
+ && apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends procps \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY patroni-test.yml /etc/cnpatroni/patroni.yml
+
+RUN chown 999:999 /etc/cnpatroni/patroni.yml \
+ && chmod 0600 /etc/cnpatroni/patroni.yml \
+ && mkdir -p /var/lib/postgresql/raft \
+ && chown 999:999 /var/lib/postgresql/raft
+
+USER 999:999
+
+# The test image replaces the production entrypoint on purpose. The renderer can only emit a
+# Kubernetes-DCS configuration, and it exits non-zero when the required variables are absent, so
+# inheriting the production entrypoint would kill every test container before Patroni started.
+# Patroni is still literal PID 1 here — more directly, in fact — and every property under test is a
+# property of Patroni as PID 1, independent of how it got there. The production entrypoint's exec
+# handoff is covered by test 1 statically and by test 8 at runtime.
+ENTRYPOINT ["/opt/cnpatroni/venv/bin/patroni", "/etc/cnpatroni/patroni.yml"]

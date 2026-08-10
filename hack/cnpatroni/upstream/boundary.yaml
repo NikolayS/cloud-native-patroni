@@ -1,0 +1,535 @@
+# The CloudNativePatroni boundary manifest.
+#
+# It declares, for every path in this repository, what CloudNativePatroni does
+# with the upstream CloudNativePG file at that path. It is the input to three
+# things at once: the divergence report, the CI drift gate, and the M0
+# high-availability authority audit.
+#
+# Read this before editing:
+#
+#   * `classification_state: target` means the ownership classes below record
+#     the *intended* end state derived from the M0 authority audit, not the
+#     current state of the code. At milestone M0 no CloudNativePG Go file has
+#     been modified yet, so every path here still contains upstream's code
+#     verbatim. The classification is what makes the gate useful now: an
+#     upstream change to a path marked `adapted` or `disabled` has to be read
+#     by a human before it is absorbed, whether or not we have edited that path
+#     yet. Flip this field to `applied` when the classifications describe code
+#     that has actually been adapted or severed.
+#
+#   * `provisional: true` downgrades the undeclared-vocabulary check (V9) from
+#     an error to a warning. Flip it to `false` in the same change that accepts
+#     the M0 authority audit.
+#
+#   * `ownership_ratchet_allow` acknowledges one dropped literal path pattern
+#     from a `cnpatroni-owned` or `disabled` rule. Every entry requires the base
+#     rule id, the exact path pattern and a reason. It cannot acknowledge a
+#     class change or the removal of an entire rule.
+#
+# Ownership classes and their merge consequences are documented in
+# docs/cnpatroni/fork-maintenance.md.
+---
+schema: cnpatroni.io/boundary/v1
+generated_from: "recon-01 + recon-02 + recon-03 @ b22682115c5f3ad1bfe69bed719151d0db918e39"
+classification_state: target
+provisional: true
+default_ownership: upstream-untouched
+
+audit_scan:
+  include: ["**/*.go"]
+  exclude: ["**/*_test.go", "tests/**", "**/zz_generated*.go"]
+
+# Go regular expressions naming the vocabulary of PostgreSQL high-availability
+# authority. A file that matches one of these and is classified
+# upstream-untouched without audit_reviewed: true is a validation finding.
+audit_terms:
+  - CurrentPrimary
+  - TargetPrimary
+  - reconcilePrimary
+  - reconcileOldPrimary
+  - PromoteAndWait
+  - pg_ctl
+  - pg_rewind
+  - 'standby\.signal'
+  - primary_conninfo
+  - primary_slot_name
+  - synchronous_standby_names
+  - '[Pp]romotionToken'
+  - FencedInstances
+  - switchover
+  - pg_promote
+  - 'recovery\.signal'
+  - restore_command
+  - recovery_target_timeline
+  - wal_log_hints
+
+# Sources that `make generate manifests apidoc` turns into checked-in output.
+# Upstream touching one of these forces a regeneration step after the merge.
+generated_artifacts:
+  - api/**
+  - config/crd/**
+  - docs/src/cloudnative-pg.v1.md
+  - internal/cmd/plugin/**
+  - .wordlist-en-custom.txt
+
+rules:
+
+  # ------------------------------------------------------------ cnpatroni-owned
+  - id: owned.upstream-tooling
+    ownership: cnpatroni-owned
+    paths:
+      - hack/cnpatroni/**
+      - .github/workflows/cnpatroni-*.yml
+      - .github/workflows-upstream/README.md
+      - docs/cnpatroni/**
+      - .gitattributes
+    note: >-
+      The upstream compatibility system, its scheduled job and the maintainer
+      documentation. Upstream has no counterpart, so an upstream path arriving
+      here is a name collision, not a merge. `.gitattributes` is generated from
+      this file by `cnpatroni-upstream gitattributes`; upstream CloudNativePG
+      has never carried one, so it is owned rather than adapted.
+
+  - id: owned.project-metadata
+    ownership: cnpatroni-owned
+    paths:
+      - CLAUDE.md
+      - NOTICE
+    note: >-
+      Binding contributor instructions and the fork's derivation notice. Neither
+      path existed at the recorded CloudNativePG fork base.
+
+  - id: owned.runtime-guard
+    ownership: cnpatroni-owned
+    paths:
+      - internal/cnpatroni/guard/**
+    note: >-
+      The fail-closed runtime guard for CloudNativePG lifecycle operations that
+      Patroni owns. CloudNativePatroni introduced this package after the fork.
+
+  - id: owned.decision-records
+    ownership: cnpatroni-owned
+    state: planned
+    paths:
+      - docs/adr/**
+    note: "Architecture decision records; ADR-002 gates the process-lifecycle work."
+
+  - id: owned.patroni-packages
+    ownership: cnpatroni-owned
+    state: planned
+    spec_refs: ["9.4"]
+    paths:
+      - internal/patroni/**
+      - internal/controller/patroni/**
+      - cmd/cnpatroni-agent/**
+      - pkg/patroni/**
+      - tests/chaos/**
+      - brand/**
+    note: >-
+      Specification 9.4 package layout plus the independent brand assets
+      required by owner directive D-1. Created from M1 onward.
+
+  - id: owned.patroni-poc
+    ownership: cnpatroni-owned
+    paths:
+      - poc/**
+    note: >-
+      The walking-skeleton proof of concept: a container image running upstream
+      Patroni as PID 1, the three-node cluster manifests, the read-only write
+      oracle and the chaos harness. The tree did not exist at the fork base and
+      upstream CloudNativePG has no counterpart, so an upstream path arriving
+      here is a name collision, not a merge. Its two Go files that match
+      audit_terms, poc/oracle/internal/bundle/redact.go and
+      poc/chaos/internal/inject/record.go, mention primary_conninfo only inside
+      the evidence-bundle redaction regexes; neither carries high-availability
+      authority.
+
+  # ------------------------------------------------------------------- disabled
+  - id: disable.pid1-supervisor
+    ownership: disabled
+    mechanism: unreferenced
+    audit_class: disable
+    destination: disabled
+    gate: [authority-audit, chaos, adr-review]
+    spec_refs: ["7.4", "8.2", "8.3"]
+    paths:
+      - internal/cmd/manager/instance/run/lifecycle/**
+      - internal/cmd/manager/instance/run/lease/**
+    note: >-
+      The PID-1 PostgreSQL supervisor and the primary-Lease renewal and
+      preemption loop (recon-01 sections 6.1 and 6.2). Disabling the Lease loop
+      alone would leave a leader-election client racing Patroni's lock in the
+      distributed configuration store.
+
+  - id: disable.election-engine
+    ownership: disabled
+    mechanism: unreferenced
+    audit_class: disable
+    destination: disabled
+    gate: [authority-audit, chaos]
+    spec_refs: ["7.4", "8.1", "8.5"]
+    paths:
+      - internal/controller/primary_lease.go
+      - internal/controller/replicas.go
+      - internal/controller/replicas_quorum.go
+      - internal/controller/cluster_restore.go
+      - internal/controller/cluster_upgrade.go
+    note: >-
+      Primary election, the failover-quorum second safety authority,
+      restore-time TargetPrimary writes, and cluster_upgrade.go's independent
+      switchPrimary engine (recon-01 sections 6.5 and 6.10).
+
+  - id: disable.instance-role-transitions
+    ownership: disabled
+    mechanism: unreferenced
+    audit_class: disable
+    destination: disabled
+    gate: [authority-audit, chaos]
+    spec_refs: ["7.4", "8.13"]
+    paths:
+      - internal/management/controller/instance_sync.go
+      - internal/management/controller/instance_token.go
+      - internal/management/controller/slots/**
+    note: >-
+      The failover-quorum publisher, the promotion-token verifier and the
+      high-availability replication-slot reconciliation.
+
+  - id: disable.process-primitives
+    ownership: disabled
+    mechanism: guarded
+    audit_class: disable
+    destination: disabled
+    gate: [authority-audit, chaos]
+    spec_refs: ["7.4", "8.13"]
+    paths:
+      - pkg/management/postgres/promote.go
+      - pkg/management/postgres/join.go
+      - pkg/management/postgres/instance_replica.go
+      - pkg/management/postgres/pidfile.go
+      - pkg/postgres/replication/**
+      - pkg/promotiontoken/**
+      - pkg/utils/fencing.go
+    note: >-
+      pg_ctl promote, the pg_basebackup join, replica-topology writes, stale-PID
+      cleanup, the synchronous_standby_names computation (recon-01 section 6.3),
+      promotion tokens, and the fencedInstances annotation, which is a second
+      authority able to stop PostgreSQL.
+
+  - id: disable.isolation-self-fence
+    ownership: disabled
+    mechanism: unreferenced
+    audit_class: disable
+    destination: disabled
+    gate: [authority-audit, chaos, adr-review]
+    spec_refs: ["8.3", "13.2"]
+    paths:
+      - pkg/management/postgres/webserver/probes/liveness.go
+      - pkg/management/postgres/webserver/probes/pinger.go
+    note: >-
+      recon-01 section 6.6: a competing self-fencing authority that fails its
+      own liveness probe on a primary that has lost the API server. Neither file
+      matches audit_terms, which is why both appear in required_paths.
+
+  - id: disable.bootstrap-jobs
+    ownership: disabled
+    mechanism: unreferenced
+    audit_class: disable
+    destination: disabled
+    gate: [authority-audit]
+    spec_refs: ["8.9"]
+    paths:
+      - internal/cmd/manager/instance/join/**
+      - internal/cmd/manager/instance/restore/**
+      - internal/cmd/manager/instance/restoresnapshot/**
+      - internal/cmd/manager/instance/pgbasebackup/**
+      - internal/cmd/manager/instance/initdb/**
+      - internal/cmd/manager/instance/upgrade/**
+      - pkg/management/upgrade/**
+    note: >-
+      Patroni owns bootstrap and replica creation; the pg_upgrade driver is
+      outside the scope of the architecture spike.
+
+  - id: disable.pod-lifecycle-reconcilers
+    ownership: disabled
+    mechanism: unreferenced
+    audit_class: disable
+    destination: disabled
+    gate: [authority-audit, chaos]
+    paths:
+      - pkg/reconciler/replicaclusterswitch/**
+      - pkg/reconciler/majorupgrade/**
+      - pkg/reconciler/hibernation/**
+    note: "recon-01 section 6.13: each of these stops or deletes PostgreSQL for its own reasons."
+
+  - id: disable.plugin-ha-commands
+    ownership: disabled
+    mechanism: unreferenced
+    audit_class: disable
+    destination: disabled
+    gate: [authority-audit]
+    spec_refs: ["8.1"]
+    paths:
+      - internal/cmd/plugin/promote/**
+      - internal/cmd/plugin/restart/**
+      - internal/cmd/plugin/fence/**
+      - internal/cmd/plugin/hibernate/**
+      - internal/cmd/plugin/maintenance/**
+    note: >-
+      recon-01 section 6.11: the promote subcommand patches Status.TargetPrimary
+      directly, bypassing the operator entirely.
+
+  - id: disable.upstream-workflows
+    ownership: disabled
+    mechanism: moved-aside
+    moved_to: .github/workflows-upstream/
+    paths:
+      - .github/workflows/backport.yml
+      - .github/workflows/chatops.yml
+      - .github/workflows/require-labels.yml
+      - .github/workflows/pr_verify_linked_issue.yml
+      - .github/workflows/release-tag.yml
+      - .github/workflows/release-pr.yml
+      - .github/workflows/release-publish.yml
+      - .github/workflows/sync-api.yml
+      - .github/workflows/sync-docs.yml
+      - .github/workflows/osps_security_assessment.yml
+      - .github/workflows/ossf_scorecard.yml
+      - .github/workflows/snyk.yml
+      - .github/workflows/k8s-versions-check.yml
+      - .github/workflows/latest-postgres-version-check.yml
+      - .github/workflows/close-inactive-issues.yml
+    note: >-
+      These inherited workflows are disabled by moving them out of GitHub
+      Actions' discovery directory. Keeping their original paths in this rule
+      lets the drift gate verify both sides of every move.
+
+  # -------------------------------------------------------------------- adapted
+  - id: adapt.instance-manager
+    ownership: adapted
+    audit_class: adapt
+    destination: cnpatroni-agent
+    gate: [authority-audit, chaos]
+    spec_refs: ["8.2", "8.12", "9.2"]
+    paths:
+      - internal/cmd/manager/instance/run/cmd.go
+      - internal/management/controller/instance_controller.go
+      - internal/management/controller/instance_startup.go
+      - internal/management/controller/common.go
+      - internal/management/controller/manager.go
+      - internal/management/controller/database_controller.go
+      - internal/management/controller/databaserole_controller.go
+      - internal/management/controller/publication_controller.go
+      - internal/management/controller/subscription_controller.go
+      - internal/cmd/manager/walrestore/cmd.go
+      - internal/cmd/manager/walarchive/cmd.go
+    note: >-
+      instance_startup.go is the highest-risk file in the tree (recon-01 row 6):
+      it demotes at lines 70 and 152 and rewinds at line 146. The declarative
+      object reconcilers survive, but their `CurrentPrimary == me` gate has to
+      become a Patroni query (specification 8.12).
+
+  - id: adapt.process-primitives
+    ownership: adapted
+    audit_class: adapt
+    destination: cnpatroni-agent
+    gate: [authority-audit, chaos]
+    spec_refs: ["7.4", "8.11", "9.3"]
+    paths:
+      - pkg/management/postgres/instance.go
+      - pkg/management/postgres/configuration.go
+      - pkg/management/postgres/restore.go
+      - pkg/management/postgres/initdb.go
+      - pkg/management/postgres/probes.go
+      - pkg/management/postgres/archiver/archiver.go
+      - pkg/management/postgres/webserver/remote.go
+      - pkg/management/postgres/webserver/local.go
+      - pkg/management/postgres/webserver/client/remote/instance.go
+      - pkg/management/postgres/webserver/metricserver/pg_collector.go
+      - pkg/management/postgres/webserver/probes/checker.go
+      - pkg/management/postgres/webserver/probes/streaming.go
+    note: >-
+      instance.go is the guardrail-1 choke point: twelve forbidden process
+      primitives are defined there (recon-01 section 3). remote.go keeps
+      /pg/status but loses /update (recon-01 section 6.9).
+
+  - id: adapt.operator-observation
+    ownership: adapted
+    audit_class: adapt
+    destination: operator
+    gate: [authority-audit]
+    spec_refs: ["8.12"]
+    paths:
+      - internal/controller/cluster_status.go
+      - internal/controller/cluster_controller.go
+      - internal/controller/cluster_create.go
+      - internal/controller/cluster_unrecoverable.go
+      - internal/controller/backup_controller.go
+      - pkg/postgres/status.go
+      - pkg/postgres/configuration.go
+      - pkg/reconciler/backup/volumesnapshot/offline.go
+    note: >-
+      cluster_status.go setPrimaryInstance is the single operator-side writer of
+      Status.TargetPrimary and the cleanest cut point in the repository.
+      PostgresqlStatusList.Less in pkg/postgres/status.go is the election
+      algorithm itself (recon-01 section 6.4). volumesnapshot/offline.go fences
+      and stops the instance; M1 must decide between disabling it and routing it
+      through a Patroni pause.
+
+  - id: adapt.pod-and-service-specs
+    ownership: adapted
+    audit_class: adapt
+    destination: operator
+    gate: [authority-audit, chaos, adr-review]
+    spec_refs: ["8.6", "8.7", "11.2", "13"]
+    paths:
+      - pkg/specs/pods.go
+      - pkg/specs/services.go
+      - pkg/specs/roles.go
+      - pkg/specs/jobs.go
+      - pkg/reconciler/instance/metadata.go
+      - pkg/reconciler/persistentvolumeclaim/metadata.go
+    note: >-
+      pods.go hard-codes the instance-manager entry point, which is the ADR-002
+      decision point. services.go selects the read-write Service on an instance
+      role label that specification 8.6 requires to become selectorless, and
+      metadata.go rewrites that label on every reconcile (recon-01 section 6.7).
+      None of these files matches audit_terms, so all four appear in
+      required_paths.
+
+  - id: adapt.api-and-validation
+    ownership: adapted
+    audit_class: adapt
+    destination: operator
+    gate: [authority-audit, regenerate]
+    spec_refs: ["8.11", "10.2"]
+    paths:
+      - api/v1/cluster_types.go
+      - api/v1/cluster_funcs.go
+      - internal/webhook/v1/cluster_webhook.go
+      - pkg/utils/parser.go
+      - internal/cmd/plugin/status/status.go
+      - internal/plugin/resources/instance.go
+    note: "Editing api/ forces `make generate manifests apidoc`; the report flags this."
+
+  - id: adapt.branding-and-build
+    ownership: adapted
+    gate: []
+    paths:
+      - README.md
+      - Makefile
+      - Dockerfile
+      - docker-bake.hcl
+      - .goreleaser.yml
+      - .spellcheck.yaml
+      - .wordlist-en-custom.txt
+      - .wokeignore
+      - .gitignore
+      - DEPENDENCIES.md
+      - .github/workflows/continuous-integration.yml
+      - .github/workflows/continuous-delivery.yml
+      - .github/workflows/registry-clean.yml
+      - .github/workflows/refresh-licenses.yml
+      - pkg/versions/versions.go
+    note: >-
+      Owner directive D-1 requires the independence disclaimer in the README.
+      recon-03 section 0 records that the version pipeline is already broken in
+      this fork because `git describe` finds no tags. `.gitignore` gains the
+      binary paths the hack/cnpatroni modules build beside their sources, which
+      no inherited rule covers because upstream builds into /bin/.
+
+  - id: adapt.project-governance
+    ownership: adapted
+    paths:
+      - CODE_OF_CONDUCT.md
+      - CONTRIBUTING.md
+      - GOVERNANCE.md
+      - MAINTAINERS.md
+      - ROADMAP.md
+      - SECURITY.md
+      - SUPPORT.md
+    note: >-
+      Upstream project-governance and support documents adapted in place for the
+      independent CloudNativePatroni fork.
+
+  # ------------------------------------------------------------------- deleted
+  - id: delete.upstream-project-metadata
+    ownership: deleted
+    paths:
+      - ADOPTERS.md
+      - CODEOWNERS
+      - SECURITY-INSIGHTS.yml
+    note: >-
+      Upstream project-specific adoption, ownership and security-insights files
+      removed by the fork identity work. All three existed at the fork base.
+
+  # --------------------------------------------------- upstream, but watched
+  - id: upstream.parked-workflows
+    ownership: upstream-untouched
+    paths:
+      - .github/workflows-upstream/backport.yml
+      - .github/workflows-upstream/chatops.yml
+      - .github/workflows-upstream/require-labels.yml
+      - .github/workflows-upstream/pr_verify_linked_issue.yml
+      - .github/workflows-upstream/release-tag.yml
+      - .github/workflows-upstream/release-pr.yml
+      - .github/workflows-upstream/release-publish.yml
+      - .github/workflows-upstream/sync-api.yml
+      - .github/workflows-upstream/sync-docs.yml
+      - .github/workflows-upstream/osps_security_assessment.yml
+      - .github/workflows-upstream/ossf_scorecard.yml
+      - .github/workflows-upstream/snyk.yml
+      - .github/workflows-upstream/k8s-versions-check.yml
+      - .github/workflows-upstream/latest-postgres-version-check.yml
+      - .github/workflows-upstream/close-inactive-issues.yml
+    note: >-
+      Verbatim copies of the inherited workflows are parked here so later
+      upstream changes remain visible. Their live source paths are declared by
+      disable.upstream-workflows with mechanism moved-aside.
+
+  - id: upstream.audit-false-positives
+    ownership: upstream-untouched
+    audit_reviewed: true
+    paths:
+      - internal/configuration/configuration.go
+      - internal/controller/rollout/doc.go
+      - pkg/postgres/wal.go
+      - internal/cmd/plugin/backup/cmd.go
+    note: >-
+      These four files match audit_terms but carry no high-availability
+      authority: three mention a parameter or a concept in a comment, and the
+      fourth uses the BackupTargetPrimary enum, which selects which instance a
+      backup reads from. Each was read at b226821.
+
+  # -------------------------------------------- catch-all; MUST stay last
+  - id: absorb
+    ownership: upstream-untouched
+    paths: ["**"]
+    note: >-
+      Everything else belongs to upstream and is absorbed wholesale, including
+      the dependency-update churn that is roughly a quarter of upstream's
+      commits.
+
+# High-availability authority paths that audit_terms does NOT match. Without
+# this list the term scan alone would leave them classified only by the
+# catch-all rule. Each was verified to exist at b226821.
+required_paths:
+  - internal/cmd/manager/instance/run/lifecycle/lifecycle.go
+  - internal/cmd/manager/instance/run/lifecycle/reaper.go
+  - internal/cmd/manager/instance/upgrade/cmd.go
+  - internal/cmd/plugin/fence/fence.go
+  - internal/management/controller/manager.go
+  - internal/management/controller/slots/runner/runner.go
+  - pkg/management/postgres/join.go
+  - pkg/management/postgres/pidfile.go
+  - pkg/management/postgres/restore.go
+  - pkg/management/postgres/webserver/local.go
+  - pkg/management/postgres/webserver/probes/checker.go
+  - pkg/management/postgres/webserver/probes/liveness.go
+  - pkg/management/postgres/webserver/probes/pinger.go
+  - pkg/reconciler/hibernation/reconciler.go
+  - pkg/reconciler/majorupgrade/reconciler.go
+  - pkg/reconciler/replicaclusterswitch/reconciler.go
+  - pkg/specs/jobs.go
+  - pkg/specs/pods.go
+  - pkg/specs/roles.go
+  - pkg/specs/services.go

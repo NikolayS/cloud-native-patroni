@@ -31,9 +31,20 @@ tests/e2e/*_logs/
 # Spellcheck dictionary
 dictionary.dic
 
+# Generated CloudNativePatroni audit documents
+/docs/cnpatroni/authority-audit.md
+/docs/cnpatroni/responsibility-map.md
+
 # OLM ignores
 bundle/
 bundle.Dockerfile
 catalog
 catalog.Dockerfile
 cloudnative-pg-catalog.yaml
+
+# CloudNativePatroni tooling binaries, produced by `go build ./...` inside the
+# hack/cnpatroni modules. They land beside their sources, so an unqualified
+# build otherwise leaves a committable ELF binary in the tree.
+/hack/cnpatroni/audit/audit
+/hack/cnpatroni/upstream/cnpatroni-upstream
+/hack/cnpatroni/upstream/cmd/cnpatroni-upstream/cnpatroni-upstream

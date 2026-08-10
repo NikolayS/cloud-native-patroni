@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cnpatroni-oracle
+  namespace: cnpatroni-poc
+  labels:
+    cnpatroni.io/component: oracle
+spec:
+  serviceAccountName: cnpatroni-oracle
+  restartPolicy: Never
+  nodeSelector:
+    node-role.kubernetes.io/control-plane: ""
+  tolerations:
+    - key: node-role.kubernetes.io/control-plane
+      operator: Exists
+      effect: NoSchedule
+  securityContext:
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: oracle
+      image: cloudnative-patroni-oracle:0.1.0
+      imagePullPolicy: IfNotPresent
+      args:
+        - run
+        - --context=kind-cnpatroni-poc
+        - --namespace=cnpatroni-poc
+        - --scope=cnpatroni-poc-rw
+        - --expected-nodes=cnpatroni-poc-1,cnpatroni-poc-2,cnpatroni-poc-3
+        - --duration=10m
+        - --bundle-dir=/var/run/cnpatroni-oracle/current
+      env:
+        - name: CNPATRONI_SCENARIO
+          value: s3-partition
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: CNPATRONI_CHAOS_PASSWORD_FILE
+          value: /var/run/secrets/cnpatroni/password
+        - name: CNPATRONI_FIXTURE_ROOT
+          value: /usr/share/cnpatroni-oracle/fixtures
+      ports:
+        - name: control
+          containerPort: 9099
+          protocol: TCP
+      resources:
+        requests:
+          cpu: 100m
+          memory: 64Mi
+        limits:
+          cpu: "1"
+          memory: 256Mi
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+      volumeMounts:
+        - name: credentials
+          mountPath: /var/run/secrets/cnpatroni
+          readOnly: true
+        - name: bundle
+          mountPath: /var/run/cnpatroni-oracle
+  volumes:
+    - name: credentials
+      secret:
+        secretName: cnpatroni-oracle-credentials
+        defaultMode: 0400
+    - name: bundle
+      emptyDir: {}

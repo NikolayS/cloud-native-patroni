@@ -1,0 +1,44 @@
+# This manifest is exact target state for later operator generation. It is a
+# walking-skeleton stepping stone, not a substitute for the operator.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cnpatroni-poc-patroni
+  namespace: cnpatroni-poc
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cnpatroni-poc-patroni
+  namespace: cnpatroni-poc
+# With use_endpoints enabled, Patroni does not use ConfigMaps. If that setting
+# changes, ConfigMap permissions must be added deliberately. The configuration
+# Service is pre-created, so Patroni needs no Service permission; one benign 403
+# per instance is expected when it attempts that create once.
+#
+# Kubernetes cannot constrain create, list, or watch by object name or label.
+# This account can therefore create any Endpoints object, list every Endpoints
+# object and Pod, patch any Endpoints object, and patch any Pod in this
+# namespace. The namespace is the security boundary and must contain one
+# Patroni cluster and nothing that needs protection from this account.
+rules:
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch", "create", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cnpatroni-poc-patroni
+  namespace: cnpatroni-poc
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cnpatroni-poc-patroni
+subjects:
+  - kind: ServiceAccount
+    name: cnpatroni-poc-patroni
+    namespace: cnpatroni-poc
