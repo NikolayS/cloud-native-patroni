@@ -273,6 +273,15 @@ fault model stated above.
 
 ## References
 
+No standards body defines *split brain*; no IETF, ISO or ANSI document does.
+Rigorous academic literature largely avoids it: Davidson, Garcia-Molina and
+Skeen's *Consistency in Partitioned Networks* (1985) discusses partitions and
+mutual inconsistency without the word. The term comes from neuropsychology:
+the callosotomy patients studied by Sperry and Gazzaniga had surgically
+separated hemispheres acting as independent agents — two decision-makers, not
+two histories. Clustering stacks popularised a state-based convention: more
+than one subset believes it is active, or more than one node acts as primary.
+
 - [Reproducing split-brain on CloudNativePG](https://coroot.com/blog/reproducing-split-brain-on-cloudnativepg/)
 - [Patroni dynamic configuration](https://patroni.readthedocs.io/en/latest/dynamic_configuration.html)
 - [Patroni DCS failsafe mode](https://patroni.readthedocs.io/en/latest/dcs_failsafe_mode.html)

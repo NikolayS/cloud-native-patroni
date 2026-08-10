@@ -7,7 +7,13 @@
   `hack/cnpatroni/audit/policy/authority-rules.yaml` (`guard_symbol`, rule
   `guard.call`);
   `hack/cnpatroni/upstream/boundary.yaml` (rule `owned.runtime-guard`);
-  `.github/workflows/cnpatroni-authority-audit.yml`
+  `.github/workflows/cnpatroni-authority-audit.yml`;
+  `authority-audit.md` (generated)
+
+The generated `authority-audit.md` and `responsibility-map.md` are not checked
+in. Produce them from the repository root with
+`go -C hack/cnpatroni/audit run . doc`; CI publishes both as the
+`cnpatroni-authority-audit` artifact.
 
 ## Context
 

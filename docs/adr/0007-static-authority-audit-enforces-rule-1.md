@@ -6,10 +6,15 @@
 - Date: 2026-08-10 02:10:32 UTC
 - Sources: `hack/cnpatroni/audit/` (`main.go`, `scan.go`, `rules.go`,
   `classify.go`, `render.go`, and `policy/`);
-  [`authority-audit.md`](../cnpatroni/authority-audit.md);
-  [`responsibility-map.md`](../cnpatroni/responsibility-map.md);
+  `authority-audit.md` (generated);
+  `responsibility-map.md` (generated);
   `.github/workflows/cnpatroni-authority-audit.yml`;
   [`CLAUDE.md`](../../CLAUDE.md) rules 1 and 4
+
+The generated `authority-audit.md` and `responsibility-map.md` are not checked
+in. Produce them from the repository root with
+`go -C hack/cnpatroni/audit run . doc`; CI publishes both as the
+`cnpatroni-authority-audit` artifact.
 
 ## Context
 

@@ -8,7 +8,13 @@
   `hack/cnpatroni/upstream/` (the `cnpatroni-upstream` tool);
   `.github/workflows/cnpatroni-upstream-sync.yml`;
   [`CLAUDE.md`](../../CLAUDE.md) rule 4;
-  [`ci-status.md`](../cnpatroni/ci-status.md)
+  [`ci-status.md`](../cnpatroni/ci-status.md);
+  `authority-audit.md` (generated)
+
+The generated `authority-audit.md` and `responsibility-map.md` are not checked
+in. Produce them from the repository root with
+`go -C hack/cnpatroni/audit run . doc`; CI publishes both as the
+`cnpatroni-authority-audit` artifact.
 
 ## Context
 
