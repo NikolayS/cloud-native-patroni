@@ -1,8 +1,8 @@
-# Dependency Management Policy
+# Dependency management policy
 
 ## Overview
 
-CloudNativePG (CNPG) is committed to maintaining a secure and stable software
+CloudNativePatroni is committed to maintaining a secure and stable software
 supply chain. As an operator managing critical database workloads, the
 integrity of our dependencies, ranging from Go modules to container base
 images, is paramount.
@@ -10,7 +10,23 @@ images, is paramount.
 **This document outlines our policies for selecting, monitoring, and updating
 third-party dependencies.**
 
-## Selection Criteria
+## What already applies, and what does not yet
+
+This policy is inherited from CloudNativePG and adopted unchanged in intent, but
+CloudNativePatroni is a pre-alpha architecture spike with no releases and no
+published images. Read it accordingly:
+
+- The selection criteria and the automated monitoring and scanning below apply
+  today, through the inherited CI configuration.
+- Artifact signing, SLSA provenance, SBOM publication, and the remediation
+  cadence describe a release process this project does not have yet. They state
+  what CloudNativePatroni will do when it publishes artifacts, not what it does
+  now.
+- Patroni and its Python dependencies are not yet packaged here. When the
+  database image is built they are pinned by version and hash, as the
+  architecture specification requires.
+
+## Selection criteria
 
 Before introducing a new dependency to the project, maintainers must evaluate
 it against the following criteria:
@@ -24,7 +40,7 @@ it against the following criteria:
 - **Licensing:** All dependencies must comply with the Apache License 2.0 or a
   compatible permissive license (e.g. MIT, BSD-3-Clause).
 
-## Automated Monitoring and Scanning
+## Automated monitoring and scanning
 
 We employ a "defense in depth" approach to monitoring our dependency tree
 through automated tooling:
@@ -47,7 +63,7 @@ through automated tooling:
   against security best practices, ensuring that our images are lean, do not run
   as `root`, and do not contain sensitive information in their history.
 
-## Supply Chain Integrity
+## Supply chain integrity
 
 To ensure that the code we build is the code we intended to use, we implement
 the following:
@@ -63,7 +79,7 @@ the following:
   every image, allowing users to verify the entire bill of materials for any
   given version.
 
-## Remediation Cadence
+## Remediation cadence
 
 Security updates are treated as high-priority tasks. The project aims for the
 following remediation timeframes:
@@ -79,3 +95,14 @@ following remediation timeframes:
 
 For security-related concerns regarding our dependencies, please refer to our
 [`SECURITY.md` file](./SECURITY.md).
+
+---
+
+This document is derived from the CloudNativePG dependency management policy and
+has been modified: the subject is now CloudNativePatroni, the section above
+states which parts do not apply yet, and headings use sentence case. The
+structure and the body text are otherwise inherited, so the difference from
+upstream stays readable.
+
+> CloudNativePatroni is an independent project derived from CloudNativePG. It is not affiliated
+> with or endorsed by CloudNativePG, CNCF, LF Projects, or the Patroni maintainers.

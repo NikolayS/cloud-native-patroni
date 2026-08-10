@@ -13,7 +13,10 @@ accepted.
 Establish a maintainable fork, prove the inherited high-availability paths are
 understood, and decide the Pod process model before committing to it.
 
-Work: fork from CloudNativePG 1.30.0 with a documented upstream merge process; a
+Work: fork from CloudNativePG — currently at commit `b226821` of 2026-08-06,
+post-1.30.0 development on upstream `main`, which is a recorded deviation from
+the `v1.30.0` base that specification section 20.1 asks for — with a documented
+upstream merge process; a
 reproducible build of the operator and database images; Patroni packaged and
 version-reported; an authority-audit document covering every
 high-availability and process-control path; a responsibility map from the

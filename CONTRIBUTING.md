@@ -16,10 +16,21 @@ shortest accurate statement of the rules that apply to everyone.
 3. Read [`docs/cnpatroni/naming-policy.md`](docs/cnpatroni/naming-policy.md)
    before introducing any new label, annotation, metric, environment variable,
    container name, or Postgres identifier.
-4. For build, test, and local environment mechanics, use the inherited developer
-   documentation in [`contribute/README.md`](contribute/README.md). It is
-   CloudNativePG's, it is still largely accurate for this fork, and where it is
-   not, say so in your pull request.
+4. For build, test, and local environment mechanics, use
+   [`contribute/development_environment`](contribute/development_environment)
+   and
+   [`contribute/e2e_testing_environment`](contribute/e2e_testing_environment).
+   Both are inherited from CloudNativePG and are still accurate for this fork;
+   where they are not, say so in your pull request.
+
+   The rest of [`contribute/README.md`](contribute/README.md) — its community,
+   governance, review-rota, roadmap, and chat-channel content — describes
+   CloudNativePG and does not apply here. It has not been rewritten yet. This
+   project's own statements are in [`GOVERNANCE.md`](GOVERNANCE.md),
+   [`MAINTAINERS.md`](MAINTAINERS.md), [`ROADMAP.md`](ROADMAP.md),
+   [`SUPPORT.md`](SUPPORT.md), and this file, and they are the ones that bind.
+   In particular, do not take questions or reports about CloudNativePatroni to
+   the CloudNativePG channels named there.
 
 ## What is currently out of bounds
 

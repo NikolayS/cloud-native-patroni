@@ -25,7 +25,10 @@ public issue in either repository for an unfixed vulnerability.
 ## Scope note
 
 Because this fork is at milestone M0, the security-relevant behaviour of the
-inherited code is unchanged from CloudNativePG 1.30.0. The high-availability
+inherited code is unchanged from its derivation point: CloudNativePG at commit
+`b226821` (2026-08-06), which is post-1.30.0 development on the upstream `main`
+branch and therefore contains changes that the 1.30.0 release does not. Do not
+map this repository onto the 1.30.0 advisory surface. The high-availability
 architecture described in the README is a target, not an implementation, and
 none of its safety properties are claimed to hold today. The limits that will
 apply even once it is implemented are stated in the README under "What is not
