@@ -618,7 +618,9 @@ func TestBaselineWriteRoundTripsExactData(t *testing.T) {
 }
 
 func TestBaselineWriteHeaderReferencesOnlyExistingDocs(t *testing.T) {
-	baseline := BuildBaseline(nil, "abc123", "2026-08-09 23:20:00 UTC")
+	res := result(nil)
+	rules := ruleSetForFindings(res)
+	baseline := BuildBaseline(rules, res, nil, 0, "abc123", "2026-08-09 23:20:00 UTC")
 	path := filepath.Join(t.TempDir(), "baseline.yaml")
 	if err := baseline.Write(path); err != nil {
 		t.Fatalf("Write: %v", err)
