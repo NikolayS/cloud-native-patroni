@@ -14,14 +14,16 @@ Patroni maintainers.
 
 ## The problem this system solves
 
-Git will merge an upstream change into a file this project has taken authority
-over, report no conflict, and say nothing. Recon measured exactly that: upstream
-added 87 lines to `pkg/management/postgres/instance.go` between the v1.30.0 tag
-and the fork base, and a trial merge reported a clean tree. A clean merge is not
-the same as a safe merge. If upstream adds a new code path that starts, stops,
-promotes or demotes PostgreSQL, and this fork absorbs it silently, the project
-has two authorities over the database process again, which is the single failure
-mode the whole architecture exists to prevent.
+Git reports a conflict only when both sides changed a file. Once this project
+has taken authority over a path, an upstream change that lands beside the fork's
+own edit merges cleanly and silently; and while the fork still holds upstream's
+code verbatim, an upstream change to a declared path is taken wholesale with no
+signal at all. A clean merge is not the same as a safe merge. If upstream adds a
+new code path that starts, stops, promotes or demotes PostgreSQL, and this fork
+absorbs it silently, the project has two authorities over the database process
+again, and loses the property that rules out the
+[concurrent timeline fork](failure-modes.md#3-concurrent-timeline-fork) the
+architecture exists to prevent.
 
 So the fork keeps a machine-readable declaration of what it does with every
 path, and refuses to let an upstream change to a declared path pass without a
@@ -221,10 +223,10 @@ The fields worth reading first:
 `validate` and `report` both run before a merge. The merge driver is the guard
 that runs during one.
 
-The reason it exists is the measurement at the top of this document: upstream
-added 87 lines to `pkg/management/postgres/instance.go` and the trial merge
-reported a clean tree. Git's own conflict signal is not evidence that a merge
-was safe, so the fork adds a signal of its own.
+The reason it exists is the first case at the top of this document: an upstream
+change landing beside this fork's own edit in a boundary file. Git's own
+conflict signal is not evidence that a merge was safe, so the fork adds a signal
+of its own.
 
 `.gitattributes` at the repository root is generated from `boundary.yaml`. Every
 path whose ownership obliges a human to read the upstream hunks — `adapted`,

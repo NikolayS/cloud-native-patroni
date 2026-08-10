@@ -7,7 +7,10 @@ has to exist before dormant publication and delivery paths can be enabled.
 
 There is no Kubernetes cluster in this project. No container runtime runs the operator in these
 checks, no operator image is published, and there is no Patroni container or Patroni process under
-test.
+test. No CI job exercises a running Postgres, a running Patroni, a failover, or a network
+partition, and no job injects a fault into the fencing path. Since a working Patroni prevents a
+concurrent timeline fork by construction, the evidence that would matter is entirely in the
+fencing-failure cases, and none of it exists yet.
 
 A fully green board is therefore not evidence that the operator works, that Patroni holds
 high-availability authority, or that any cluster behaves correctly. It is evidence only that the
@@ -65,7 +68,7 @@ Exactly eight workflow files remain active under `.github/workflows/`.
 | File | Disposition |
 |---|---|
 | `continuous-integration.yml` | Runs on pull requests and is active and required. GoReleaser now uses `--snapshot` because the fork has no tags. Publication is gated by the `ENABLE_IMAGE_PUSH` repository variable. The gate is event-agnostic: while the variable is unset, it disables publication for pull requests, pushes to `main`, and the nightly schedule alike. The image build still builds the `distroless` and `ubi` targets for `linux/amd64` and `linux/arm64` on pull requests that change operator, test, shell-script, or Go code, per the `change-triage` gate; documentation-only pull requests skip `buildx` entirely. |
-| `codeql-analysis.yml` | Active and passing. It was briefly red for an unrelated reason: a deliberately malformed Go test fixture under `hack/cnpatroni/audit/testdata/` broke `make generate` during the CodeQL build step. Commit `20e49a0e` fixed the fixture, after which run `31346382287` concluded `success`. CodeQL usually takes six to nine minutes and is often the last pending check. |
+| `codeql-analysis.yml` | Active and passing. It was briefly red for an unrelated reason: a deliberately malformed Go test fixture under `hack/cnpatroni/audit/testdata/` broke `make generate` during the CodeQL build step. Commit `20e49a0e` fixed the fixture, after which run `31346382287` concluded `success`. |
 | `spellcheck.yml` | Active and passing. It provides the `Run spellcheck` and `Run woke` checks. Its spellcheck sources cover `docs/src/` Markdown and `config/olm-manifests/bases/*.yaml`, so `docs/cnpatroni/` is not spellchecked; woke covers the wider tree according to its own configuration. |
 | `cnpatroni-authority-audit.yml` | Fork-owned, active, and passing. Its authority and code-hygiene jobs run on every pull request and push to `main`. |
 | `cnpatroni-upstream-sync.yml` | Fork-owned and contains two jobs. `boundary-guard` runs on every pull request and pushes to `main`, `cnpatroni/**`, and `spike/**`, and is passing. `divergence-report` runs only on the weekly schedule and `workflow_dispatch`, so its pull-request skip is correct. |

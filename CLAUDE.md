@@ -31,11 +31,12 @@ The operator, the integration agent, kubelet, the container runtime, and any
 minimal init may observe state or remove availability by terminating a process
 or container. They must never grant write authority, promote PostgreSQL, or
 restart PostgreSQL independently of Patroni. Nothing outside Patroni may run
-`pg_ctl promote`, start/stop/restart PostgreSQL for a high-availability
-decision, create or remove `standby.signal`, write `primary_conninfo`,
-`primary_slot_name`, or `synchronous_standby_names`, run `pg_rewind`, select a
-promotion candidate, acquire the inherited primary Lease, or set
-`TargetPrimary`. See specification section 7.4.
+`pg_ctl promote` or call `pg_promote()`, start/stop/restart PostgreSQL for a
+high-availability decision, create or remove `standby.signal` or
+`recovery.signal`, write `primary_conninfo`, `primary_slot_name`, or
+`synchronous_standby_names`, run `pg_rewind`, select a promotion candidate,
+acquire the inherited primary Lease, or set `TargetPrimary`. See specification
+section 7.4.
 
 Do not add a second controller "temporarily". Any change that reintroduces a
 competing decision-maker is rejected regardless of how small the diff is.

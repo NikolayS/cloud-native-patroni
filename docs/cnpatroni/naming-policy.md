@@ -7,7 +7,7 @@ defers this policy's central open question to a naming ADR that does not exist
 yet. The mechanical rename it describes is **not** authorised in any case.
 Baseline: CloudNativePG at commit `b226821` (2026-08-06), post-1.30.0
 development on upstream `main`; the inherited version constant reads 1.30.0.
-Last updated: 2026-08-10 00:44:00 UTC.
+Last updated: 2026-08-10 04:25:26 UTC.
 
 This document states which identifiers CloudNativePatroni will own, which are
 frozen until after the architecture spike, which belong to Patroni and must
@@ -86,7 +86,7 @@ The target state. None of it is implemented at M0; see section 3.
 | Service suffixes | `-rw`, `-ro`, `-r`, `-any` | unchanged; selection logic changes, names do not |
 | Secret and PVC suffixes | `-app`, `-superuser`, `-replication`, `-ca`, `-server`, `-wal`, `-tbs-` | unchanged, plus new Patroni REST and rewind secrets |
 | Operator environment variables | bare `WATCH_NAMESPACE`, `OPERATOR_*`, 25 in total | all prefixed `CNPATRONI_` |
-| Instance Pod environment variables | `PGDATA`, `POD_NAME`, `NAMESPACE`, `CLUSTER_NAME`, `PSQL_HISTORY`, `PGPORT`, `PGHOST` | `PG*` kept verbatim (they are libpq's); the rest become `CNPATRONI_*`; Patroni's own `PATRONI_*` added |
+| Instance Pod environment variables | `PGDATA`, `POD_NAME`, `NAMESPACE`, `CLUSTER_NAME`, `PSQL_HISTORY`, `PGPORT`, `PGHOST` | kept verbatim because Postgres itself reads them — `PGHOST` and `PGPORT` are libpq's, `PGDATA` is read by `postgres`, `pg_ctl` and `initdb`, `PSQL_HISTORY` is psql's; the rest become `CNPATRONI_*`; Patroni's own `PATRONI_*` added |
 | Postgres roles | `cnpg_pooler_pgbouncer`, `cnpg_metrics_exporter` | `cnpatroni_pooler_pgbouncer`, `cnpatroni_metrics_exporter`, plus a Patroni rewind role |
 | Reserved Postgres role prefix | `cnpg_` | `cnpatroni_` |
 | HA replication-slot prefix | `_cnpg_` | Patroni manages HA slots; likely deleted rather than renamed |
@@ -153,14 +153,17 @@ the write Service selectorless so Patroni owns the paired Endpoints object.
 | `kubernetes.role_label` | `cnpatroni.io/role` | `role` |
 | `kubernetes.leader_label_value` | `primary` | `primary` |
 | `kubernetes.follower_label_value` | `replica` | `replica` |
-| `kubernetes.standby_leader_label_value` | `primary` | `primary` |
+| `kubernetes.standby_leader_label_value` | see collision 4 below | `primary` |
 | `kubernetes.scope_label` | see the open question below | `cluster-name` |
 | `kubernetes.labels` | the operator-owned cluster selector | none |
 
-Also Patroni-owned: the leader lock and the Endpoints object named after the
-Patroni scope, member state, failsafe state, and Patroni's dynamic configuration.
+Also Patroni-owned, with `kubernetes.use_endpoints: true`: the leader lock and
+the Endpoints object named after the Patroni scope, member state, failsafe
+state, and Patroni's dynamic configuration. Without that setting Patroni keeps
+the same state in a ConfigMap, creates no Endpoints object, and
+`kubernetes.ports` has no effect.
 
-Three collisions must be resolved by the naming ADR before any of this is
+Four collisions must be resolved by the naming ADR before any of this is
 implemented:
 
 1. **Patroni's default `role_label` is literally the inherited bare `role`
@@ -168,7 +171,9 @@ implemented:
    in place would have Patroni and an operator reconciler writing the same key
    from independent state machines. Setting `role_label: cnpatroni.io/role`
    avoids the key clash but does not by itself stop the operator writing `role`;
-   that writer must be removed.
+   that writer must be removed. `kubernetes.tmp_role_label`, if it is ever set,
+   reintroduces the same vocabulary: its value always uses the default for the
+   corresponding role, whatever the custom label values are.
 2. **`scope_label` value versus the operator's cluster label.** Patroni stamps
    `scope_label` with the value of its `scope`, which ADR-001 proposes to be
    `<cluster>-rw`, while the operator's cluster label means `<cluster>`. If both
@@ -180,6 +185,13 @@ implemented:
 3. **The inherited primary Lease**, created per cluster as a promotion mutex, is
    a deletion target rather than a naming problem; specification section 8.1
    forbids the operator creating or renewing it.
+4. **`standby_leader_label_value` defaults to the same value as
+   `leader_label_value`.** Patroni labels a standby-cluster leader `primary`,
+   the value a writable primary carries, so the role label alone cannot
+   distinguish a node that accepts writes from one that does not. Standby
+   clusters are out of scope for the spike, but the ADR must either give the
+   standby leader a distinct value or record that no consumer of this label may
+   read it as a writability signal.
 
 ## 5. Rename inventory and checklist
 
