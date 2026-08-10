@@ -28,12 +28,12 @@ recovery to Patroni.
   process model in particular is subject to ADR-002, which is **proposed and not
   yet accepted**.
 - Out of scope for the spike, per specification section 5.3: converting an
-  existing CloudNativePG cluster in place; backup, point-in-time recovery,
-  scheduled backups, volume snapshots, and CNPG-I plugins; major Postgres
-  upgrades; cross-region and standby clusters; synchronous replication; the
-  Pooler, Database, DatabaseRole, Publication, and Subscription resources;
-  alternative distributed configuration stores; a Patroni fork; and any support
-  or service-level commitment.
+  existing cluster in place; backup, point-in-time recovery, scheduled backups,
+  volume snapshots, and CNPG-I plugins; major Postgres upgrades; cross-region
+  and standby clusters; synchronous replication; the Pooler, Database,
+  DatabaseRole, Publication, and Subscription resources; alternative
+  distributed configuration stores; a Patroni fork; and any support or
+  service-level commitment.
 - Milestones, per specification section 16: **M0** fork hygiene, authority
   audit, and the process ADR; **M1** a Patroni-owned three-node cluster; **M2**
   container lifecycle, probes, and routing; **M3** the chaos safety gate; **M4**
@@ -42,99 +42,63 @@ recovery to Patroni.
 
 ## Why this project exists
 
-### The claim, and what it is not
+### Three failover classes
 
-Running Patroni underneath a Kubernetes operator is a well-trodden,
-production-proven model. Crunchy Data PGO, StackGres, and Zalando's
-postgres-operator all use Patroni for high availability. CloudNativePG is the
-outlier in implementing its own.
+Postgres failover has three distinct failure classes. The full
+[failure taxonomy](docs/cnpatroni/failure-modes.md) defines their mechanisms and
+limits.
 
-CloudNativePatroni therefore does not claim to invent an architecture. It claims
-something narrower: that CloudNativePG's operator surface — its declarative API,
-its resource and lifecycle machinery, and the ecosystem built around it — is
-worth keeping, and that its self-implemented high-availability layer is not. The
-fork exists to combine the first with Patroni, rather than to rebuild the
-operator surface that adopting an existing Patroni-based operator would ask us
-to give up.
+1. **Data loss at failover.** With asynchronous replication, an acknowledged
+   transaction whose write-ahead log the promoted standby never received may be
+   lost. Patroni documents the bound as `maximum_lag_on_failover` bytes plus
+   whatever is written during the last lease interval. It is an accepted
+   durability trade, not a correctness failure; synchronous replication is the
+   separate design that addresses this class.
+2. **Sequential timeline fork.** The old primary stops before the new primary
+   accepts writes. Postgres starts a new timeline, and `pg_rewind` later returns
+   the former primary to the last checkpoint the two shared, from which it
+   replays the new timeline. What rewind drops is the old timeline's orphaned
+   tail, whose acknowledged part was already lost under the first class.
+3. **Concurrent timeline fork (split brain).** Two nodes accept writes beyond
+   the divergence point at the same time. Both histories contain acknowledged
+   commits, they cannot be merged, and choosing either one discards unbounded
+   work from the other.
 
-### The difference in where write authority is proven
+Preventing the third class requires that write authority be removed from the old
+node before a replacement starts — either the node loses the ability to
+acknowledge a commit on its own, or something outside it fences the node. It
+does not prevent the first class, and preventing the first class does not
+prevent the third. CloudNativePatroni does not yet claim that the third class is
+prevented: the direct-Pod write oracle has not run against a live cluster, and
+the eventual guarantee will be limited to a supported fault model.
 
-CloudNativePG arbitrates failover through the control plane: the operator
-decides which instance is primary and records that decision. An instance that
-loses connectivity to the Kubernetes API has no obligation to prove it still
-holds that authority, and can keep accepting writes while the remaining side
-promotes a replacement. Service label changes do not stop it, because stale
-kube-proxy state and workloads inside the isolated partition — including jobs
-running inside Postgres itself — can still reach the old primary. This is the
-failure reported in
-[CloudNativePG issue #7407](https://github.com/cloudnative-pg/cloudnative-pg/issues/7407)
-and described in specification section 3.2.
+### Why Patroni under an operator
 
-Patroni's model places the proof on the instance. A node may remain primary only
-while it can renew the leader lock in the distributed configuration store, or
-while failsafe mode confirms it can still reach every known member. Otherwise
-Patroni demotes Postgres locally, before another member can win leadership.
+Patroni under a Kubernetes operator is a proven model used by Crunchy Data PGO,
+StackGres, and Zalando's postgres-operator. CloudNativePatroni keeps the
+CloudNativePG operator surface — its declarative API, resource and lifecycle
+machinery, and ecosystem — while replacing the inherited self-implemented
+high-availability layer with upstream Patroni.
 
-### The argument is not one issue
-
-Issue #7407 is a symptom, and repairing it is not the objective. The objective
-is to stop reimplementing Postgres high availability. Patroni carries roughly
-fifteen years of accumulated production behaviour that any self-implemented
-high-availability layer must otherwise rediscover, including:
-
-- distributed-configuration-store failsafe mode;
-- watchdog keepalive tied to leader-lock renewal;
-- `pg_rewind` safety, including checkpoint-before-rewind, diverged-timeline
-  detection, non-superuser rewind grants, the `wal_log_hints` and data-checksum
-  preconditions, and the data-directory removal policy;
-- timeline and history-file checks before following a leader;
-- candidate eligibility through `maximum_lag_on_failover`, `failover_priority`,
-  and `nofailover`;
-- the LSN-comparison leader race;
-- crash-recovery semantics driven by `pg_controldata` that refuse to restart a
-  possibly diverged former primary as leader;
-- quorum commit and `synchronous_mode_strict`;
-- permanent replication slots, and slot-position advancing on replicas so slots
-  survive failover;
-- `pending_restart` tracking with per-major-version parameter validation;
-- `pause` for maintenance without stopping Postgres.
-
-Adding a fence to a self-implemented layer would deliver the leader lock alone
-and leave every item above to be built and maintained here.
+The objective is to stop reimplementing Postgres high availability. Patroni
+carries many years of accumulated production behaviour around leader-lock
+renewal, failsafe mode, candidate eligibility, timeline validation,
+`pg_rewind`, crash recovery, replication slots, synchronous modes, and
+maintenance. Those behaviours would otherwise have to be built and maintained
+in this project.
 
 ### The counter-argument, stated honestly
 
-Crunchy Data PGO, StackGres, and Zalando postgres-operator already work. For
-anyone who does not specifically need CloudNativePG's API, resource model, and
-ecosystem, adopting one of them is the cheaper path, and this project does not
-argue otherwise. The case for CloudNativePatroni rests entirely on wanting to
-keep that particular operator surface. If you do not, one of those projects is
-the better choice.
+Crunchy Data PGO, StackGres, and Zalando's postgres-operator already provide
+this model. For anyone who does not specifically need CloudNativePG's API,
+resource model, and ecosystem, adopting one of them is cheaper. This project is
+for the narrower case where keeping that operator surface matters.
 
-### Why a fork rather than a contribution
+### Why this is a fork
 
-Adopting Patroni would place a Python runtime in the database image and replace
-a subsystem that CloudNativePG has deliberately chosen to own, so it is not a
-change that project is likely to accept; that is a description of a design
-difference, not a criticism of it.
-
-### What is not claimed
-
-- **No universal split-brain impossibility guarantee.** Without a functioning
-  watchdog or an external fence, specification section 12.3 lists cases the
-  project explicitly does not cover: complete VM or node pause and later resume;
-  a frozen container cgroup; Patroni suspended while kubelet is stopped, hung,
-  or unable to execute probes; kernel hangs; storage that acknowledges writes
-  incorrectly; Byzantine networking or Kubernetes API behaviour; a compromised
-  root account or a process that deliberately bypasses Patroni; and failure to
-  stop Postgres before lock expiration when the whole local safety stack is
-  stalled.
-- **Preventing two writable primaries is not zero data loss.** The spike uses
-  asynchronous replication. Acknowledged commits may be lost during failover if
-  they were not replicated to the promoted standby. `maximum_lag_on_failover`
-  bounds candidate eligibility; it is not a recovery-point guarantee.
-  Specification sections 4.6 and 12.5 separate high-availability safety from
-  durability, and durability policy is a later design with its own test matrix.
+Adopting Patroni adds a Python runtime to the database image and replaces the
+inherited high-availability subsystem. Maintaining that change as a fork keeps
+the integration boundary explicit.
 
 ## Architecture summary
 
@@ -202,7 +166,7 @@ Compressed from the authority matrix in specification section 7.3:
 | Promotion and demotion | Patroni |
 | Replication topology, slots, `pg_rewind`, reinitialization | Patroni |
 | Dynamic high-availability configuration | Patroni |
-| Write routing | Patroni-managed Endpoint behind a selectorless Service |
+| Write routing | Patroni-managed Endpoints (`kubernetes.use_endpoints: true`) behind a selectorless Service; not a write-safety boundary — it steers new connections, not open ones or direct Pod access |
 | Read routing | Patroni-derived Pod labels; not a write-safety boundary |
 | Cluster status | Operator, as an observer; informational, never authoritative |
 | Container restart and hang detection | kubelet and the container runtime |
@@ -267,8 +231,8 @@ the identifier policy, or the upstream integration process, and you need the
 architecture and its constraints in one place.
 
 **It is not for anyone who wants to run Postgres.** If you need a Postgres
-operator today, use one that is released: CloudNativePG, or one of the
-Patroni-based operators named above. This repository has nothing to install.
+operator today, use one that is released. This repository has nothing to
+install.
 
 ## Repository orientation
 
