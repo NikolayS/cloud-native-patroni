@@ -1,0 +1,85 @@
+### 2026-05-27T20:26:43-0700 SAMPLE t101
+## cluster
+Waiting for the instances to become active current=splitbrain-4 target=splitbrain-4 ready=3 instances=6
+## pods
+NAME           READY   STATUS    RESTARTS   AGE     IP           NODE                                NOMINATED NODE   READINESS GATES
+splitbrain-1   0/1     Pending   0          6m26s   <none>       <none>                              <none>           <none>
+splitbrain-4   1/1     Running   0          11m     10.244.2.4   cnpg-sync6-logged-fq-skew-worker    <none>           <none>
+splitbrain-5   1/1     Running   0          10m     10.244.5.4   cnpg-sync6-logged-fq-skew-worker6   <none>           <none>
+splitbrain-6   1/1     Running   0          8m55s   10.244.4.5   cnpg-sync6-logged-fq-skew-worker4   <none>           <none>
+## failoverquorum
+apiVersion: postgresql.cnpg.io/v1
+kind: FailoverQuorum
+metadata:
+  annotations:
+    cnpg.io/operatorVersion: 1.29.1
+  creationTimestamp: "2026-05-28T03:11:21Z"
+  generation: 1
+  labels:
+    cnpg.io/cluster: splitbrain
+  name: splitbrain
+  namespace: cnpg-sync6-logged-fq-skew
+  ownerReferences:
+  - apiVersion: postgresql.cnpg.io/v1
+    controller: true
+    kind: Cluster
+    name: splitbrain
+    uid: 628bc588-906f-4ff3-9bf5-301b7f9d2771
+  resourceVersion: "2822"
+  uid: e5caa831-1ea7-453d-bb6d-a4f608177f57
+status:
+  method: ANY
+  primary: splitbrain-4
+  standbyNames:
+  - splitbrain-5
+  - splitbrain-6
+  - splitbrain-1
+  - splitbrain-2
+  - splitbrain-3
+  standbyNumber: 2
+## API-visible primary SQL: splitbrain-4
+             now              | pg_is_in_recovery |     host     
+------------------------------+-------------------+--------------
+ 2026-05-28 03:26:45.88816+00 | f                 | splitbrain-4
+(1 row)
+
+                                     synchronous_standby_names                                     
+---------------------------------------------------------------------------------------------------
+ ANY 2 ("splitbrain-5","splitbrain-6","splitbrain-1","splitbrain-2","splitbrain-3","splitbrain-4")
+(1 row)
+
+ application_name |   state   | sync_state | sent_lsn  | write_lsn | flush_lsn | replay_lsn 
+------------------+-----------+------------+-----------+-----------+-----------+------------
+ splitbrain-5     | streaming | quorum     | 0/D01FBE8 | 0/D01FBE8 | 0/D01FBE8 | 0/D01FBE8
+ splitbrain-6     | streaming | quorum     | 0/D01FBE8 | 0/D01FBE8 | 0/D01FBE8 | 0/D01FBE8
+(2 rows)
+
+    origin    | pg_is_in_recovery |              min              |              max              | count 
+--------------+-------------------+-------------------------------+-------------------------------+-------
+ splitbrain-1 | f                 | 2026-05-28 03:18:03.813074+00 | 2026-05-28 03:18:37.970073+00 |   194
+ splitbrain-4 | f                 | 2026-05-28 03:20:13.903663+00 | 2026-05-28 03:26:45.669757+00 |  2146
+(2 rows)
+
+## direct old primary SQL: splitbrain-1 on cnpg-sync6-logged-fq-skew-worker5
+old_cid=fba68339a5ec8b464cd3b0cdbfe1a203808fe5aff4ee1d4112e934a5d1b4dc21
+              now              | pg_is_in_recovery |     host     
+-------------------------------+-------------------+--------------
+ 2026-05-28 03:26:47.816503+00 | f                 | splitbrain-1
+(1 row)
+
+                                     synchronous_standby_names                                     
+---------------------------------------------------------------------------------------------------
+ ANY 2 ("splitbrain-2","splitbrain-3","splitbrain-4","splitbrain-5","splitbrain-6","splitbrain-1")
+(1 row)
+
+ application_name |   state   | sync_state | sent_lsn  | write_lsn | flush_lsn | replay_lsn 
+------------------+-----------+------------+-----------+-----------+-----------+------------
+ splitbrain-2     | streaming | quorum     | 0/D050320 | 0/D050320 | 0/D050320 | 0/D050320
+ splitbrain-3     | streaming | quorum     | 0/D050320 | 0/D050320 | 0/D050320 | 0/D050320
+(2 rows)
+
+    origin    | pg_is_in_recovery |              min              |              max              | count 
+--------------+-------------------+-------------------------------+-------------------------------+-------
+ splitbrain-1 | f                 | 2026-05-28 03:18:03.813074+00 | 2026-05-28 03:26:47.632016+00 |  3042
+(1 row)
+

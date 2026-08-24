@@ -1,0 +1,188 @@
+# Split-brain/data-loss reproduction
+
+This directory contains a Docker-based reproduction of a PostgreSQL split-brain/data-loss window using PostgreSQL synchronous streaming replication.
+
+It sets up one primary and two streaming replicas, enables `synchronous_standby_names = 'ANY 1 (replica1, replica2)'`, partitions the old primary away from the replica that will be promoted while keeping another synchronous quorum member reachable, promotes replica1, writes to both primaries, then reconnects the old primary and runs `pg_rewind`.
+
+The expected result is a demonstrated split-brain/data-loss state: both PostgreSQL servers accept and commit writes independently during the partition, and the writes acknowledged by the isolated old primary are absent after `pg_rewind`.
+
+## Run
+
+```bash
+cd split-brain-sim
+./setup-and-simulate.sh
+```
+
+Compatibility wrapper:
+
+```bash
+./simulate.sh
+```
+
+Cleanup:
+
+```bash
+docker compose down -v
+# or:
+./simulate.sh --cleanup
+```
+
+## What the output shows
+
+- Initial replicated baseline rows
+- Synchronous replication enabled with `ANY 1 (replica1, replica2)`
+- Primary partitioned from the promoted-replica network while replica2 remains reachable as a synchronous quorum member
+- Replica1 promotion
+- Concurrent writes to the old and new primaries
+- Divergent row counts confirming split brain
+- `pg_rewind` of the old primary onto the promoted primary timeline
+- Old-primary partition writes absent after rewind
+
+## CloudNativePG/kind reproduction for upstream #7407
+
+This repository also includes a kind-based reproduction that uses the real CloudNativePG operator and Kubernetes resources. It creates a 3-instance CNPG cluster matching the original upstream issue shape: liveness pinger disabled, no synchronous replication, and a kind node partition using `docker network disconnect kind <node>`.
+
+```bash
+./split-brain-sim/cnpg-kind-7407-repro.sh
+```
+
+The expected result is that CNPG promotes a new primary while the old primary remains locally writable on the disconnected kind node. After the node is reconnected and CNPG reconciles the old primary, rows written only to the old primary during the partition are absent from the current primary.
+
+Useful environment variables:
+
+```bash
+KEEP_CLUSTER=1 ./split-brain-sim/cnpg-kind-7407-repro.sh
+CLUSTER_NAME=cnpg-7407-test ./split-brain-sim/cnpg-kind-7407-repro.sh
+CNPG_MANIFEST=releases/cnpg-1.25.1.yaml ./split-brain-sim/cnpg-kind-7407-repro.sh
+```
+
+### PgQue/pg_cron workload variant
+
+For a higher-write-rate database-internal workload, use the PgQue/pg_cron variant. It builds a CNPG-compatible PostgreSQL image with `pg_cron` and PgQue v0.2.0, schedules PgQue's 10 Hz ticker loop through pg_cron, and schedules producer/consumer jobs that continue writing inside PostgreSQL during the partition without external client writes.
+
+```bash
+./split-brain-sim/cnpg-kind-pgque-repro.sh
+```
+
+Useful knobs:
+
+```bash
+EVENTS_PER_SECOND=1000 PARTITION_SECONDS=30 ./split-brain-sim/cnpg-kind-pgque-repro.sh
+KEEP_CLUSTER=1 ./split-brain-sim/cnpg-kind-pgque-repro.sh
+```
+
+## PostgreSQL-only non-WAL / split-brain-adjacent state reproduction
+
+`pg-local-non-wal-split-brain-repro.sh` is a local PostgreSQL reproduction that
+separates PostgreSQL behavior from Kubernetes/CNPG behavior. It creates a
+primary plus synchronous standby, promotes the standby while leaving the old
+primary running, proves ordinary logged writes on the old primary block in
+`SyncRep`, then tests state classes that can still diverge or act independently:
+
+- unlogged relations
+- cached/prelogged sequence values
+- advisory locks
+- LISTEN/NOTIFY event streams
+- logical decoding of a logged-table transaction while its client is still blocked in SyncRep
+- user-created physical and logical replication slots
+
+Temporary relations are explicitly excluded in the generated result because they
+are session-local scratch state rather than durable cluster-visible split-brain
+state.
+
+```bash
+./split-brain-sim/pg-local-non-wal-split-brain-repro.sh
+```
+
+The last captured run is committed at:
+
+```text
+split-brain-sim/pg-local-non-wal-split-brain-results.md
+```
+
+## CNPG normal sync-rep unlogged `pg_cron` window hunt
+
+`cnpg-kind-sync-unlogged-cron-window-repro.sh` searches for an automatic two-writable-primary window under normal modern CNPG settings: `dataDurability: required`, `failoverQuorum: true`, and the default primary isolation liveness check enabled. It runs a database-internal `pg_cron` workload that calls a stored procedure once per second; the procedure inserts into an `UNLOGGED` table and commits after each row, defaulting to 100 commits/rows per tick. It then isolates the old primary's kind node.
+
+Intended cases:
+
+```bash
+INSTANCES=3 SYNC_NUMBER=1 COMMITS_PER_TICK=100 ./split-brain-sim/cnpg-kind-sync-unlogged-cron-window-repro.sh
+INSTANCES=5 SYNC_NUMBER=2 COMMITS_PER_TICK=100 ./split-brain-sim/cnpg-kind-sync-unlogged-cron-window-repro.sh
+```
+
+The captured 3-node `ANY 1` and 5-node `ANY 2` runs did not find overlapping old-primary and new-primary writes. See:
+
+```text
+split-brain-sim/cnpg-normal-sync-unlogged-cron-results.md
+```
+
+## CNPG synchronous-replication kubelet/fencing-failure split-brain result
+
+`cnpg-kind-sync5-kubelet-dead-repro.sh` tests a harsher failure mode: a
+5-instance CNPG cluster with synchronous replication `ANY 2`,
+`dataDurability: required`, `failoverQuorum: true`, and default isolation
+liveness enabled, but with kubelet/probe enforcement stopped on the old-primary
+node before the old primary Pod object is force-deleted from the Kubernetes API.
+
+This simulates the leadership side of the failure: Kubernetes/CNPG can promote a
+new primary because the old-primary Pod has disappeared from API state, while the
+old PostgreSQL container/process is not fenced by kubelet and continues running
+on the old node.
+
+The captured run found overlapping SQL-writable primaries: Kubernetes/CNPG
+promoted `splitbrain-4`, while the directly reached old primary `splitbrain-1`
+remained `pg_is_in_recovery = false` and continued accepting local unlogged
+writes for the full observation window.
+
+See:
+
+```text
+split-brain-sim/cnpg-sync5-kubelet-dead-results.md
+```
+
+## CNPG logged-table kubelet/fencing experiments
+
+`cnpg-kind-sync6-logged-kubelet-fencing-repro.sh` is the sharper logged-data
+variant. It creates a 6-instance cluster with synchronous replication `ANY 2`,
+keeps the old primary connected to two synchronous standbys so ordinary
+`logged_loop_probe` inserts can commit with `synchronous_commit=on`, then stops
+kubelet on the old-primary node and force-deletes the old-primary Pod object.
+
+Two outcomes are captured:
+
+- With default `failoverQuorum: true`, CNPG did not promote. The failover quorum
+  check rejected the promotion because the promotion side had only three
+  candidates from a five-name synchronous standby set: `3 + 2 > 5` is false.
+- With `failoverQuorum: false`, CNPG promoted another primary and both sides
+  committed ordinary WAL-backed rows for minutes. This proves synchronous
+  replication by itself is not fencing; the failover-quorum and kubelet/fencing
+  layers are what prevent this logged-data case.
+
+See:
+
+```text
+split-brain-sim/cnpg-sync6-logged-kubelet-fencing-results.md
+```
+
+## CNPG logged-table failover-quorum status-skew experiment
+
+`cnpg-kind-sync6-logged-fq-skew-repro.sh` extends the logged-data test with
+`failoverQuorum: true` still enabled, but injects a stale/skewed
+`FailoverQuorum.Status` that lists only the promotion-side standbys. It then
+stops kubelet on the old side and force-deletes the old-side Pod objects while
+preserving the old primary's PostgreSQL process and its two actual synchronous
+standbys.
+
+The captured run promoted `splitbrain-4` while the old primary `splitbrain-1`
+continued committing ordinary WAL-backed `logged_loop_probe` rows with
+`synchronous_commit=on` against `splitbrain-2` and `splitbrain-3`.
+
+This is intentionally framed as an injected metadata-skew repro, not yet proof
+that CNPG naturally produces that skew.
+
+See:
+
+```text
+split-brain-sim/cnpg-sync6-logged-fq-skew-results.md
+```

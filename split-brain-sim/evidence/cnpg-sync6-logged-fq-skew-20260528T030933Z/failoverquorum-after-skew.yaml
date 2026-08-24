@@ -1,0 +1,27 @@
+apiVersion: postgresql.cnpg.io/v1
+kind: FailoverQuorum
+metadata:
+  annotations:
+    cnpg.io/operatorVersion: 1.29.1
+  creationTimestamp: "2026-05-28T03:11:21Z"
+  generation: 1
+  labels:
+    cnpg.io/cluster: splitbrain
+  name: splitbrain
+  namespace: cnpg-sync6-logged-fq-skew
+  ownerReferences:
+  - apiVersion: postgresql.cnpg.io/v1
+    controller: true
+    kind: Cluster
+    name: splitbrain
+    uid: 628bc588-906f-4ff3-9bf5-301b7f9d2771
+  resourceVersion: "2605"
+  uid: e5caa831-1ea7-453d-bb6d-a4f608177f57
+status:
+  method: any
+  primary: splitbrain-1
+  standbyNames:
+  - splitbrain-4
+  - splitbrain-5
+  - splitbrain-6
+  standbyNumber: 2
